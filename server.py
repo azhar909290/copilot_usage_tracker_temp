@@ -10,9 +10,9 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
 
-from .parser import parse_spans
-from .pricing import PriceBook
-from .store import UsageStore
+from parser import parse_spans
+from pricing import PriceBook
+from store import UsageStore
 
 log = logging.getLogger("otel_cost")
 logging.basicConfig(level=logging.INFO)
