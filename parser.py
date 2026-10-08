@@ -45,7 +45,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
     events: list[dict] = []
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
-        user = (
+        resource_user = (
             res.get("enduser.id")
             or res.get("user.name")
             or res.get("user.id")
@@ -54,7 +54,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
         default_agent = res.get("service.name") or "copilot-chat"
 
         spans = [s for ss in rs.get("scopeSpans", []) for s in ss.get("spans", [])]
-        by_id = {s.get("spanId"): s for s in spans}
+        by_id = {(s.get("traceId", ""), s.get("spanId")): s for s in spans}
 
         # 1) remember every span that names an agent
         for s in spans:
@@ -72,12 +72,26 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 pid = cur.get("parentSpanId")
                 if not pid:
                     break
-                pkey = f"{cur.get('traceId','')}:{pid}"
+                pkey = f"{cur.get('traceId', '')}:{pid}"
                 if pkey in _AGENT_CACHE:
                     return _AGENT_CACHE[pkey]
-                cur = by_id.get(pid)
+                cur = by_id.get((cur.get("traceId", ""), pid))
                 hops += 1
             return default_agent
+
+        def resolve_user(span: dict) -> str:
+            cur, hops = span, 0
+            while cur is not None and hops < 12:
+                a = attrs(cur.get("attributes"))
+                user = a.get("enduser.id") or a.get("user.name") or a.get("user.id")
+                if user:
+                    return str(user)
+                pid = cur.get("parentSpanId")
+                if not pid:
+                    break
+                cur = by_id.get((cur.get("traceId", ""), pid))
+                hops += 1
+            return str(resource_user)
 
         # 2) build events from spans that carry token usage
         for s in spans:
@@ -101,7 +115,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                     "key": f"{s.get('traceId','')}:{s.get('spanId','')}",
                     "timestamp": ts.isoformat(),
                     "date": ts.astimezone(DAILY_TZ).date().isoformat(),
-                    "user": str(user),
+                    "user": resolve_user(s),
                     "agent": resolve_agent(s),
                     "request_model": req_model,
                     "response_model": resp_model,
