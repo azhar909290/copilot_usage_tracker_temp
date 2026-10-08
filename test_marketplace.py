@@ -48,6 +48,21 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(agents[0]["plugin_name"], "Document Tools")
         self.assertEqual(agents[0]["version"], "2.1.0")
 
+    def test_invalid_agent_error_identifies_source_file(self):
+        json_payloads = [
+            {"plugins": [{"path": "plugin.json"}]},
+            {"components": {"agents": ["agents/broken.agent.md"]}},
+        ]
+        with patch.object(marketplace, "_fetch_json", side_effect=json_payloads), \
+                patch.object(marketplace, "_fetch_text", return_value="# Agent without metadata"):
+            with self.assertRaisesRegex(
+                ValueError,
+                r"https://example\.test/agents/broken\.agent\.md: Agent definition is missing YAML frontmatter",
+            ):
+                marketplace._load_agents(
+                    "https://example.test/marketplace.json", "https://example.test/"
+                )
+
     def test_keeps_cached_catalog_when_refresh_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             cache_path = Path(directory) / "catalog.json"

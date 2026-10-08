@@ -100,7 +100,13 @@ def _load_agents(source_url: str, repository_root: str | None = None) -> list[di
             if not isinstance(agent_path, str):
                 continue
             agent_url = _relative_url(manifest_url, agent_path)
-            metadata = _agent_metadata(_fetch_text(agent_url))
+            markdown = _fetch_text(agent_url)
+            try:
+                metadata = _agent_metadata(markdown)
+            except (ValueError, yaml.YAMLError) as error:
+                raise ValueError(
+                    f"Invalid agent definition at {_safe_source(agent_url)}: {error}"
+                ) from error
             name = str(metadata.get("name") or Path(agent_path).stem)
             agents.append(
                 {
