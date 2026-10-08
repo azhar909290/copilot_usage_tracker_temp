@@ -3,4 +3,4 @@ import uvicorn
 
 if __name__ == "__main__":
     uvicorn.run("server:app", host=os.getenv("HOST", "127.0.0.1"),
-                port=int(os.getenv("PORT", "4318")))
+                port=int(os.getenv("PORT", "4318")), access_log=False)
