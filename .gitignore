@@ -6,6 +6,8 @@ venv/
 .venv/
 env/
 
+frontend/out/
+
 .pytest_cache/
 .coverage
 htmlcov/
