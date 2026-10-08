@@ -1,5 +1,7 @@
 """Sends a fake OTLP/JSON batch: one Copilot chat span, one plugin-agent child span."""
-import json, time, urllib.request
+import json, os, time, urllib.request
+
+ENDPOINT = os.getenv("OTLP_ENDPOINT", "https://otel-data-h3f2g0fqgrc4e6bn.westindia-01.azurewebsites.net").rstrip("/")
 
 now = str(int(time.time() * 1e9))
 def a(k, v):
@@ -18,6 +20,6 @@ payload = {"resourceSpans": [{
      "attributes": [a("gen_ai.operation.name", "chat"), a("gen_ai.request.model", "claude-sonnet-4"),
                     a("gen_ai.usage.input_tokens", 5000), a("gen_ai.usage.output_tokens", 1500)]},
   ]}]}]}
-req = urllib.request.Request("http://127.0.0.1:4318/v1/traces", json.dumps(payload).encode(),
+req = urllib.request.Request(f"{ENDPOINT}/v1/traces", json.dumps(payload).encode(),
                              {"Content-Type": "application/json"})
 print(urllib.request.urlopen(req).read())
