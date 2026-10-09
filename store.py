@@ -70,6 +70,35 @@ class UsageStore:
             self._flush_csv()
             return len(new)
 
+    def delete_user(self, username: str) -> int:
+        with self._lock:
+            if not self.events_path.exists():
+                return 0
+
+            retained_lines = []
+            deleted = 0
+            with open(self.events_path, "r", encoding="utf-8") as source:
+                for line in source:
+                    event = json.loads(line)
+                    if event.get("user") == username:
+                        deleted += 1
+                    else:
+                        retained_lines.append(line)
+
+            if not deleted:
+                return 0
+
+            temp_path = self.events_path.with_suffix(".tmp")
+            with open(temp_path, "w", encoding="utf-8") as target:
+                target.writelines(retained_lines)
+            os.replace(temp_path, self.events_path)
+
+            self._seen.clear()
+            self._daily.clear()
+            self._replay()
+            self._flush_csv()
+            return deleted
+
     def _flush_csv(self) -> None:
         rows, totals = [], {}
         for (date, user, agent, model), r in sorted(self._daily.items()):

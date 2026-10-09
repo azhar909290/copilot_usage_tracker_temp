@@ -1,5 +1,6 @@
 """OTLP/HTTP receiver that prices GenAI spans from VS Code / Copilot / custom agents."""
 import gzip
+import hmac
 import json
 import logging
 import os
@@ -7,7 +8,7 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
@@ -45,7 +46,7 @@ frontend_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
-    allow_methods=["GET"],
+    allow_methods=["GET", "DELETE"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
@@ -135,6 +136,30 @@ async def ignore(request: Request):
 )
 def usage():
     return {"currency": prices.currency, "rows": store.summary()}
+
+
+@app.delete(
+    "/api/v1/usage/users/{username}",
+    name="delete_user_usage",
+    operation_id="delete_user_usage",
+    tags=["Usage"],
+)
+def delete_user_usage(username: str, authorization: str | None = Header(default=None)):
+    expected_token = os.getenv("USER_DATA_DELETE_TOKEN")
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="User data deletion is not configured")
+
+    scheme, separator, supplied_token = (authorization or "").partition(" ")
+    if (not separator or scheme.lower() != "bearer"
+            or not hmac.compare_digest(supplied_token.encode(), expected_token.encode())):
+        raise HTTPException(
+            status_code=401,
+            detail="A valid bearer token is required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    deleted = store.delete_user(username)
+    return {"user": username, "deleted_events": deleted}
 
 
 @app.get("/agents", include_in_schema=False)
