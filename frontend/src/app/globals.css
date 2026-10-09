@@ -182,6 +182,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .table-note { margin: 12px 0; color: #b0604d; font-size: 10px; }
 .model-cell-dot { width: 7px; height: 7px; display: inline-block; margin-right: 8px; background: #7198e1; border-radius: 50%; }
 .share-bar { width: 100px; }.share-bar span { height: 100%; display: block; background: #a9cd67; border-radius: inherit; }
+.user-table { min-width: 760px; }.user-unpriced { display: block; margin-top: 3px; color: #a27646; font-size: 8px; }.share-cell { display: flex; align-items: center; gap: 8px; color: #7a847b; font: 9px var(--font-mono); }.share-cell .share-bar { width: 72px; }
 
 .recent-section { margin: 0 1px 12px; }
 .recent-section > .panel-heading { padding: 0 1px; margin-bottom: 9px; }
@@ -235,6 +236,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 	.heading-meta { width: 100%; justify-content: space-between; }.filter-row { flex-wrap: wrap; gap: 7px; padding: 8px; }.search-field { min-width: 100%; flex-basis: 100%; border-bottom: 1px solid #eceee6; }.select-filter { min-width: 0; flex: 1; }.auto-refresh-control { margin-left: 2px; }
 	.metric-grid { gap: 8px; }.metric-card { min-height: 105px; padding: 12px 10px; }.metric-highlight { padding-top: 11px; }.metric-label { font-size: 8px; }.metric-value { margin: 10px 0 6px; font-size: 22px; }.metric-foot { overflow: hidden; font-size: 8px; text-overflow: ellipsis; }
 	.trend-panel, .model-panel { min-height: 290px; padding: 15px 12px 11px; }.chart-frame { height: 195px; }.chart-legend { gap: 8px; font-size: 9px; }.chart-bottomline { gap: 9px; font-size: 8px; }.chart-bottomline .chart-period { font-size: 7px; }
-	.bottom-panel, .full-panel { padding-right: 12px; padding-left: 12px; }.panel-heading h2, .recent-section h2 { font-size: 14px; }.agent-table { min-width: 720px; }.data-table { min-width: 700px; }.recent-row { gap: 8px; padding-right: 8px; padding-left: 8px; }.recent-cost { display: none; }.recent-copy small { max-width: 130px; }.recent-tokens { font-size: 9px; }
+	.bottom-panel, .full-panel { padding-right: 12px; padding-left: 12px; }.panel-heading h2, .recent-section h2 { font-size: 14px; }.agent-table { min-width: 720px; }.data-table { min-width: 700px; }.user-table { min-width: 760px; }.recent-row { gap: 8px; padding-right: 8px; padding-left: 8px; }.recent-cost { display: none; }.recent-copy small { max-width: 130px; }.recent-tokens { font-size: 9px; }
 	.page-footer { font-size: 7px; }
 }

@@ -60,7 +60,7 @@ type CatalogResponse = {
   agents: CatalogAgent[];
 };
 
-type View = "overview" | "agents" | "models" | "activity";
+type View = "overview" | "users" | "agents" | "models" | "activity";
 type Period = 7 | 30 | 90;
 type DailyPoint = {
   date: string;
@@ -111,6 +111,7 @@ function getCsvValue(value: string | number) {
 
 const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "users", label: "Users", icon: Users },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "models", label: "Models", icon: Cpu },
   { id: "activity", label: "Activity", icon: Activity },
@@ -119,6 +120,7 @@ const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = 
 export default function Home() {
   const [view, setView] = useState<View>("overview");
   const [period, setPeriod] = useState<Period>(30);
+  const [selectedUser, setSelectedUser] = useState("all");
   const [selectedAgent, setSelectedAgent] = useState("all");
   const [selectedModel, setSelectedModel] = useState("all");
   const [search, setSearch] = useState("");
@@ -210,6 +212,7 @@ export default function Home() {
 
   const filteredRows = usageRows.filter((row) => {
     const matchesPeriod = !cutoffDate || row.date >= cutoffDate;
+    const matchesUser = selectedUser === "all" || row.user === selectedUser;
     const matchesAgent = selectedAgent === "all" || row.agent === selectedAgent;
     const matchesModel = selectedModel === "all" || row.model === selectedModel;
     const query = search.trim().toLowerCase();
@@ -218,7 +221,7 @@ export default function Home() {
       [row.user, row.agent, row.model].some((value) =>
         value.toLowerCase().includes(query),
       );
-    return matchesPeriod && matchesAgent && matchesModel && matchesSearch;
+    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
   });
 
   const totals = filteredRows.reduce(
@@ -265,6 +268,7 @@ export default function Home() {
   }
   const agentNames = [...new Set(usageRows.map((row) => row.agent))].sort();
   const modelNames = [...new Set(usageRows.map((row) => row.model))].sort();
+  const userNames = [...new Set(usageRows.map((row) => row.user))].sort();
   const activeLabel = navigation.find((item) => item.id === view)?.label || "Overview";
 
   function exportCsv() {
@@ -319,6 +323,7 @@ export default function Home() {
               <Icon size={18} strokeWidth={1.8} />
               <span>{label}</span>
               {id === "agents" && <span className="nav-count">{catalog?.agents.length ?? 0}</span>}
+              {id === "users" && <span className="nav-count">{userNames.length}</span>}
             </button>
           ))}
         </nav>
@@ -411,6 +416,14 @@ export default function Home() {
             </label>
             <label className="select-filter">
               <Users size={15} />
+              <select aria-label="Filter by user" onChange={(event) => setSelectedUser(event.target.value)} value={selectedUser}>
+                <option value="all">All users</option>
+                {userNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <ChevronDown size={14} />
+            </label>
+            <label className="select-filter">
+              <Bot size={15} />
               <select aria-label="Filter by agent" onChange={(event) => setSelectedAgent(event.target.value)} value={selectedAgent}>
                 <option value="all">All agents</option>
                 {agentNames.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -519,6 +532,13 @@ export default function Home() {
             </section>
           )}
 
+          {view === "users" && (
+            <section className="panel full-panel">
+              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>Usage by user</h2></div><span className="inventory-count">{userNames.length} USERS</span></div>
+              <UserTable rows={filteredRows} currency={currency} />
+            </section>
+          )}
+
           {view === "models" && (
             <section className="panel full-panel">
               <div className="panel-heading"><div><div className="section-kicker">MODEL PERFORMANCE</div><h2>Usage by model</h2></div><span className="inventory-count">{modelRows.length} MODELS</span></div>
@@ -593,6 +613,31 @@ function RecentActivity({ rows, onViewAll }: { rows: UsageRow[]; onViewAll: () =
       <div className="panel-heading"><div><div className="section-kicker">LATEST RECORDED</div><h2>Recent activity</h2></div><button className="text-link" onClick={onViewAll} type="button">Full activity <ArrowUpRight size={13} /></button></div>
       {recent.length ? <div className="recent-list">{recent.map((row, index) => <div className="recent-row" key={`${row.date}-${row.agent}-${row.model}-${index}`}><span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span><div className="recent-copy"><strong>{row.agent}</strong><small>{row.model} · {row.user}</small></div><span className="recent-tokens">{formatCompact(row.input_tokens + row.output_tokens)} <small>tokens</small></span><span className="recent-cost">${row.cost.toFixed(4)}</span><time>{displayDate(row.date, { month: "short", day: "numeric" })}</time></div>)}</div> : <EmptyState loading={false} label="No activity found for these filters." />}
     </section>
+  );
+}
+
+function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
+  const metrics = new Map<string, { requests: number; input: number; output: number; cost: number; unpriced: number }>();
+  for (const row of rows) {
+    const current = metrics.get(row.user) || { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0 };
+    current.requests += row.requests;
+    current.input += row.input_tokens;
+    current.output += row.output_tokens;
+    current.cost += row.cost;
+    current.unpriced += row.unpriced_requests;
+    metrics.set(row.user, current);
+  }
+  const userRows = [...metrics.entries()].sort((a, b) => b[1].cost - a[1].cost || b[1].requests - a[1].requests);
+  const totalTokens = userRows.reduce((total, [, measure]) => total + measure.input + measure.output, 0);
+
+  return (
+    <div className="table-scroll"><table className="data-table user-table"><thead><tr><th>USER</th><th>CALLS</th><th>INPUT TOKENS</th><th>OUTPUT TOKENS</th><th>TOTAL TOKENS</th><th>EST. COST</th><th>SHARE</th></tr></thead><tbody>
+      {userRows.map(([user, measure]) => {
+        const tokens = measure.input + measure.output;
+        const share = totalTokens ? (tokens / totalTokens) * 100 : 0;
+        return <tr key={user}><td>{user}</td><td>{formatCount(measure.requests)}</td><td>{formatCount(measure.input)}</td><td>{formatCount(measure.output)}</td><td>{formatCount(tokens)}</td><td>{formatMoney(measure.cost, currency)}{measure.unpriced > 0 && <small className="user-unpriced">{formatCount(measure.unpriced)} unpriced</small>}</td><td><div className="share-cell"><div className="share-bar"><span style={{ width: `${share}%` }} /></div><span>{share.toFixed(1)}%</span></div></td></tr>;
+      })}
+    </tbody></table>{!userRows.length && <EmptyState loading={false} label="No user usage in this date range." />}</div>
   );
 }
 
