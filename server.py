@@ -49,7 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
-prices = PriceBook(os.getenv("PRICES_FILE", "prices.yaml"))
+prices = PriceBook()
 store = UsageStore(os.getenv("DATA_DIR", "data"))
 marketplace = MarketplaceCatalog(os.path.join(store.dir, "marketplace_cache.json"))
 
@@ -112,9 +112,6 @@ async def traces(request: Request):
     if added:
         cost = sum(e["cost"] for e in events)
         log.info("recorded %d LLM calls, batch cost %.6f %s", added, cost, prices.currency)
-        for e in events:
-            if not e["priced"]:
-                log.warning("no price for model %r (add it to prices.yaml)", e["model"])
     # OTLP success response (empty ExportTraceServiceResponse)
     if "json" in ctype:
         return Response(content="{}", media_type="application/json")

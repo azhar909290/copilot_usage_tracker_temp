@@ -46,10 +46,10 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
         resource_user = (
-            res.get("enduser.id")
-            or res.get("user.name")
+            res.get("user.name")
+            or res.get("enduser.id")
             or res.get("user.id")
-            or os.getenv("DEFAULT_USER", "unknown")
+            or "unknown"
         )
         default_agent = res.get("service.name") or "copilot-chat"
 
@@ -83,7 +83,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
             cur, hops = span, 0
             while cur is not None and hops < 12:
                 a = attrs(cur.get("attributes"))
-                user = a.get("enduser.id") or a.get("user.name") or a.get("user.id")
+                user = a.get("user.name") or a.get("enduser.id") or a.get("user.id")
                 if user:
                     return str(user)
                 pid = cur.get("parentSpanId")
