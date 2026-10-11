@@ -13,11 +13,14 @@ import {
   Cpu,
   LayoutDashboard,
   LoaderCircle,
+  Moon,
   RefreshCw,
   Search,
   ShieldAlert,
   Sparkles,
+  Sun,
   Users,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -29,7 +32,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 type UsageRow = {
   date: string;
@@ -110,12 +113,29 @@ function getCsvValue(value: string | number) {
 }
 
 const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "overview", label: "Command Center", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "models", label: "Models", icon: Cpu },
   { id: "activity", label: "Activity", icon: Activity },
 ];
+
+function subscribeTheme(callback: () => void) {
+  window.addEventListener("storage", callback);
+  window.addEventListener("dashboard-theme", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("dashboard-theme", callback);
+  };
+}
+
+function savedTheme() {
+  try {
+    return localStorage.getItem("signal-theme") === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
 
 export default function Home() {
   const [view, setView] = useState<View>("overview");
@@ -134,9 +154,40 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const paletteRef = useRef<HTMLDialogElement>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [temporaryTheme, setTemporaryTheme] = useState<string | null>(null);
+  const storedTheme = useSyncExternalStore(subscribeTheme, savedTheme, () => "dark");
+  const theme = temporaryTheme ?? storedTheme;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  function toggleTheme() {
+    try {
+      localStorage.setItem("signal-theme", theme === "dark" ? "light" : "dark");
+      setTemporaryTheme(null);
+      window.dispatchEvent(new Event("dashboard-theme"));
+    } catch {
+      setTemporaryTheme(theme === "dark" ? "light" : "dark");
+    }
+  }
+
+  useEffect(() => {
+    if (paletteOpen) paletteRef.current?.showModal();
+    else paletteRef.current?.close();
+  }, [paletteOpen]);
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandQuery("");
+        setPaletteOpen((open) => !open);
+        return;
+      }
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (
@@ -218,7 +269,7 @@ export default function Home() {
     const query = search.trim().toLowerCase();
     const matchesSearch =
       !query ||
-      [row.user, row.agent, row.model].some((value) =>
+      [row.date, row.user, row.agent, row.model].some((value) =>
         value.toLowerCase().includes(query),
       );
     return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
@@ -270,6 +321,28 @@ export default function Home() {
   const modelNames = [...new Set(usageRows.map((row) => row.model))].sort();
   const userNames = [...new Set(usageRows.map((row) => row.user))].sort();
   const activeLabel = navigation.find((item) => item.id === view)?.label || "Overview";
+  const commands = [
+    ...navigation.map((item) => ({
+      label: item.label, kind: "View", icon: item.icon,
+      run: () => setView(item.id),
+    })),
+    ...agentNames.map((name) => ({
+      label: name, kind: "Agent", icon: Bot,
+      run: () => { setView("agents"); setSelectedAgent(name); setSelectedUser("all"); setSelectedModel("all"); setSearch(""); },
+    })),
+    ...userNames.map((name) => ({
+      label: name, kind: "User", icon: Users,
+      run: () => { setView("users"); setSelectedUser(name); setSelectedAgent("all"); setSelectedModel("all"); setSearch(""); },
+    })),
+    { label: "Refresh data", kind: "Action", icon: RefreshCw, run: () => setRefreshKey((key) => key + 1) },
+    { label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", kind: "Action", icon: Sun, run: toggleTheme },
+    { label: "Clear filters", kind: "Action", icon: X, run: () => { setSelectedUser("all"); setSelectedAgent("all"); setSelectedModel("all"); setSearch(""); } },
+  ].filter((item) => item.label.toLowerCase().includes(commandQuery.trim().toLowerCase())).slice(0, 12);
+
+  function runCommand(command: (typeof commands)[number]) {
+    command.run();
+    setPaletteOpen(false);
+  }
 
   function exportCsv() {
     const columns: (keyof UsageRow)[] = [
@@ -299,14 +372,13 @@ export default function Home() {
       <aside className="sidebar">
         <a className="brand" href="#overview" onClick={() => setView("overview")}>
           <span className="brand-mark"><Command size={19} strokeWidth={2.4} /></span>
-          <span className="brand-copy"><strong>signal</strong><small>USAGE INTELLIGENCE</small></span>
+          <span className="brand-copy"><strong>Agent Command</strong><small>CENTER</small></span>
         </a>
 
         <div className="workspace-label">WORKSPACE</div>
         <div className="workspace-switcher">
           <span className="workspace-avatar">A</span>
-          <span className="workspace-name"><strong>All activity</strong><small>Local workspace</small></span>
-          <ChevronDown size={15} />
+          <span className="workspace-name"><strong>Team workspace</strong><small>Copilot usage</small></span>
         </div>
 
         <div className="nav-label">ANALYTICS</div>
@@ -331,22 +403,25 @@ export default function Home() {
         <div className="sidebar-bottom">
           <div className="source-card">
             <div className="source-card-top"><span className="source-pulse" /> RECEIVER</div>
-            <strong>{error ? "Connection issue" : "API connected"}</strong>
+            <strong>{error ? "Connection issue" : updatedAt ? "Live backend" : "Connecting"}</strong>
             <small>{API_BASE.replace(/^https?:\/\//, "")}</small>
           </div>
           <a className="help-link" href={`${API_BASE}/docs`} target="_blank" rel="noreferrer">
             <CircleHelp size={16} /> API reference <ArrowUpRight size={13} />
           </a>
-          <div className="sidebar-foot"><span>LOCAL INSTANCE</span><span>v1.0</span></div>
+          <div className="sidebar-foot"><span>COPILOT OBSERVABILITY</span></div>
         </div>
       </aside>
 
       <section className="main-panel">
         <header className="topbar">
-          <div className="breadcrumb"><span>ANALYTICS</span><span className="breadcrumb-slash">/</span><strong>{activeLabel}</strong></div>
+          <button className="command-search" onClick={() => { setCommandQuery(""); setPaletteOpen(true); }} type="button" aria-label="Open command search">
+            <Search size={17} /><span>Search agents, users, pages...</span><Command size={13} />
+          </button>
           <div className="topbar-actions">
+            <span className="updated-label">{updatedAt ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span>
             <span className={`connection-status ${error ? "offline" : ""}`}>
-              <span className="status-dot" /> {error ? "API issue" : "Live data"}
+              <span className="status-dot" /> {error ? "API issue" : updatedAt ? "Live data" : "Connecting"}
             </span>
             <button
               className="icon-button refresh-button"
@@ -358,9 +433,9 @@ export default function Home() {
             >
               <RefreshCw size={16} className={refreshing ? "spin" : ""} />
             </button>
-            <div className="profile-button" aria-label="Current user">
-              <span>AZ</span><ChevronDown size={13} />
-            </div>
+            <button className="icon-button" onClick={toggleTheme} type="button" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
           </div>
         </header>
 
@@ -368,14 +443,15 @@ export default function Home() {
           <div className="page-heading">
             <div>
               <div className="eyebrow"><Sparkles size={13} /> COPILOT TELEMETRY</div>
-              <h1>{view === "overview" ? "Usage overview" : `${activeLabel} overview`}</h1>
-              <p>Understand where your team’s AI work is going.</p>
+              <h1>{activeLabel}</h1>
+              <p>{selectedUser === "all" ? "Team workspace" : selectedUser} / Last {period} days</p>
             </div>
             <div className="heading-meta">
               <div className="period-control" role="group" aria-label="Date range">
                 {([7, 30, 90] as Period[]).map((days) => (
                   <button
                     className={period === days ? "selected" : ""}
+                    aria-pressed={period === days}
                     key={days}
                     onClick={() => setPeriod(days)}
                     type="button"
@@ -408,11 +484,10 @@ export default function Home() {
               <input
                 aria-label="Search usage"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search user, agent, model"
+                placeholder="Search date, user, agent, model"
                 ref={searchRef}
                 value={search}
               />
-              <kbd>/</kbd>
             </label>
             <label className="select-filter">
               <Users size={15} />
@@ -484,10 +559,10 @@ export default function Home() {
                             <linearGradient id="inputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5488e8" stopOpacity={0.22} /><stop offset="100%" stopColor="#5488e8" stopOpacity={0} /></linearGradient>
                             <linearGradient id="outputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#df7057" stopOpacity={0.19} /><stop offset="100%" stopColor="#df7057" stopOpacity={0} /></linearGradient>
                           </defs>
-                          <CartesianGrid stroke="#e9e9e2" vertical={false} />
+                          <CartesianGrid stroke="var(--line)" vertical={false} />
                           <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} minTickGap={24} />
                           <YAxis axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} tickFormatter={formatCompact} />
-                          <Tooltip contentStyle={{ border: "1px solid #e7e8df", borderRadius: 6, boxShadow: "0 8px 25px #18211d12" }} formatter={(value, name) => [formatCount(Number(value)), name === "input" ? "Input tokens" : "Output tokens"]} labelStyle={{ color: "#343934", fontWeight: 700 }} />
+                          <Tooltip contentStyle={{ background: "var(--surface)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6 }} formatter={(value, name) => [formatCount(Number(value)), name === "input" ? "Input tokens" : "Output tokens"]} labelStyle={{ color: "var(--ink)", fontWeight: 700 }} />
                           <Area type="monotone" dataKey="input" name="input" stroke="#5488e8" strokeWidth={2.2} fill="url(#inputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
                           <Area type="monotone" dataKey="output" name="output" stroke="#df7057" strokeWidth={2.2} fill="url(#outputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
                         </AreaChart>
@@ -513,6 +588,7 @@ export default function Home() {
                 </article>
               </section>
 
+              <UsageHeatmap rows={filteredRows} period={period} endDate={updatedAt?.toISOString().slice(0, 10) ?? null} onSelect={(date) => { setSearch(date); setView("activity"); }} />
               <section className="panel bottom-panel">
                 <div className="panel-heading bottom-panel-heading">
                   <div><div className="section-kicker">WORKLOAD</div><h2>Agent activity</h2></div>
@@ -553,8 +629,44 @@ export default function Home() {
           <footer className="page-footer"><span><span className="footer-status" /> RECEIVER {error ? "UNAVAILABLE" : "OPERATIONAL"}</span><span>{updatedAt ? `LAST SYNC ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "WAITING FOR DATA"}</span></footer>
         </div>
       </section>
+      <dialog ref={paletteRef} className="command-dialog" onCancel={() => setPaletteOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setPaletteOpen(false); }} aria-label="Command search">
+        <div className="command-dialog-inner">
+          <div className="command-input-row"><Search size={19} /><input autoFocus aria-label="Search commands" placeholder="Search agents, users, pages..." value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} onKeyDown={(event) => {
+            if (event.key === "Enter" && commands[0]) { event.preventDefault(); runCommand(commands[0]); }
+            if (event.key === "ArrowDown") { event.preventDefault(); paletteRef.current?.querySelector<HTMLButtonElement>(".command-result")?.focus(); }
+          }} /><button type="button" className="icon-button" title="Close search" aria-label="Close search" onClick={() => setPaletteOpen(false)}><X size={17} /></button></div>
+          <div className="command-results" onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+            event.preventDefault();
+            const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".command-result"));
+            const currentIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            buttons[(currentIndex + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+          }}>
+            {commands.map((command) => <button type="button" className="command-result" key={`${command.kind}-${command.label}`} onClick={() => runCommand(command)}><command.icon size={18} /><span>{command.label}</span><small>{command.kind}</small><ArrowUpRight size={14} /></button>)}
+            {!commands.length && <div className="empty-state">No matches</div>}
+          </div>
+        </div>
+      </dialog>
     </main>
   );
+}
+
+function UsageHeatmap({ rows, period, endDate, onSelect }: { rows: UsageRow[]; period: Period; endDate: string | null; onSelect: (date: string) => void }) {
+  if (!endDate) return null;
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.date, (counts.get(row.date) || 0) + row.requests);
+  const maximum = Math.max(1, ...counts.values());
+  const start = end - (period - 1) * 86_400_000;
+  const offset = new Date(start).getUTCDay();
+  const cells = Array.from({ length: offset + period }, (_, index) => {
+    if (index < offset) return <span className="heatmap-spacer" key={`spacer-${index}`} />;
+    const date = new Date(start + (index - offset) * 86_400_000).toISOString().slice(0, 10);
+    const count = counts.get(date) || 0;
+    const level = count ? Math.max(1, Math.ceil(count / maximum * 4)) : 0;
+    return <button className={`heatmap-cell level-${level}`} key={date} type="button" title={`${date}: ${formatCount(count)} calls`} aria-label={`${date}: ${formatCount(count)} calls`} onClick={() => onSelect(date)} />;
+  });
+  return <section className="heatmap-section"><div className="panel-heading"><div><div className="section-kicker">DAILY PULSE</div><h2>Activity calendar</h2></div><span className="inventory-count">{counts.size} ACTIVE DAYS</span></div><div className="heatmap-layout"><div className="heatmap-day-labels"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div className="heatmap-grid">{cells}</div><div className="heatmap-summary"><strong>{formatCount(rows.reduce((total, row) => total + row.requests, 0))}</strong><span>calls / {period} days</span><div className="heatmap-legend"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell level-${level}`} />)}<span>More</span></div></div></div></section>;
 }
 
 function EmptyState({ loading, label }: { loading: boolean; label: string }) {
