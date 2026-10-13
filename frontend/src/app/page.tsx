@@ -285,6 +285,12 @@ export default function Home() {
     }),
     { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0 },
   );
+  const activeUsers = new Set(
+    filteredRows
+      .map((row) => row.user)
+      .filter((user) => user.trim().toLowerCase() !== "unknown"),
+  ).size;
+  const modelsUsed = new Set(filteredRows.map((row) => row.model)).size;
 
   const dailyMap = new Map<string, DailyPoint>();
   for (const row of filteredRows) {
@@ -522,9 +528,9 @@ export default function Home() {
 
           <section className="metric-grid" aria-label="Usage totals">
             <article className="metric-card metric-highlight">
-              <div className="metric-label">LLM CALLS <Zap size={14} /></div>
+              <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
               <div className="metric-value">{loading ? "—" : formatCount(totals.requests)}</div>
-              <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the last {period} days</div>
+              <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the current results</div>
             </article>
             <article className="metric-card">
               <div className="metric-label">TOTAL TOKENS <Boxes size={14} /></div>
@@ -532,14 +538,14 @@ export default function Home() {
               <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
             </article>
             <article className="metric-card">
-              <div className="metric-label">ESTIMATED COST <Activity size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatMoney(totals.cost, currency)}</div>
-              <div className="metric-foot">Model-rate estimate · {currency}</div>
+              <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
+              <div className="metric-value">{loading ? "—" : formatCount(activeUsers)}</div>
+              <div className="metric-foot">Known users in the current results</div>
             </article>
             <article className="metric-card">
-              <div className="metric-label">UNPRICED CALLS <ShieldAlert size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatCount(totals.unpriced)}</div>
-              <div className="metric-foot">{totals.unpriced ? "Rates needed for full cost" : "All calls have a configured rate"}</div>
+              <div className="metric-label">MODELS USED <Cpu size={14} /></div>
+              <div className="metric-value">{loading ? "—" : formatCount(modelsUsed)}</div>
+              <div className="metric-foot">Distinct models in the current results</div>
             </article>
           </section>
 

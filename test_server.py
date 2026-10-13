@@ -1,12 +1,73 @@
+import asyncio
 import os
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 
 import server
 from store import UsageStore
+from telemetry import AgentTelemetry
+
+
+class AgentTelemetryTests(unittest.TestCase):
+    def test_sdk_exports_agent_metrics_through_protobuf_receiver(self):
+        batches = []
+
+        class Receiver(BaseHTTPRequestHandler):
+            def do_POST(self):
+                batches.append(self.rfile.read(int(self.headers["Content-Length"])))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, format, *args):
+                pass
+
+        collector = HTTPServer(("127.0.0.1", 0), Receiver)
+        worker = threading.Thread(target=collector.serve_forever, daemon=True)
+        worker.start()
+        self.addCleanup(collector.server_close)
+        self.addCleanup(worker.join)
+        self.addCleanup(collector.shutdown)
+        with tempfile.TemporaryDirectory() as directory:
+            usage_store = UsageStore(directory)
+            with patch.object(server, "store", usage_store):
+                endpoint = f"http://127.0.0.1:{collector.server_port}/v1/traces"
+                with AgentTelemetry(endpoint=endpoint) as telemetry:
+                    for name in ("Planner", "Reviewer"):
+                        with telemetry.llm_call(name, "test-model", "alice") as span:
+                            span.set_attribute("gen_ai.usage.input_tokens", 100)
+                            span.set_attribute("gen_ai.usage.output_tokens", 20)
+                            span.set_attribute("gen_ai.response.model", "resolved-model")
+                    self.assertTrue(telemetry.flush())
+                self.assertEqual(len(batches), 1)
+                request = Mock(
+                    headers={"content-type": "application/x-protobuf"},
+                    body=AsyncMock(return_value=batches[0]),
+                )
+                response = asyncio.run(server.traces(request))
+                self.assertEqual(response.status_code, 200)
+                rows = server.usage()["rows"]
+                self.assertEqual([row["agent"] for row in rows], ["Planner", "Reviewer"])
+                for row in rows:
+                    self.assertEqual(row["user"], "alice")
+                    self.assertEqual(row["model"], "resolved-model")
+                    self.assertEqual(row["input_tokens"], 100)
+                    self.assertEqual(row["output_tokens"], 20)
+                    self.assertEqual(row["total_tokens"], 120)
+                    self.assertGreaterEqual(row["latency_ms_avg"], 0)
+                    self.assertAlmostEqual(row["cost"], 0.000119)
+                asyncio.run(server.traces(request))
+                self.assertEqual(usage_store.summary(), rows)
+
+    def test_empty_agent_name_is_rejected(self):
+        with AgentTelemetry() as telemetry:
+            with self.assertRaises(ValueError):
+                with telemetry.llm_call(" ", "test-model"):
+                    self.fail("An unnamed agent must not produce a span")
 
 
 class DeleteUserUsageTests(unittest.TestCase):

@@ -7,9 +7,10 @@ from pathlib import Path
 
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
-    "requests", "input_tokens", "output_tokens", "cost", "unpriced_requests",
+    "requests", "input_tokens", "output_tokens", "total_tokens", "cost", "unpriced_requests",
+    "latency_ms_total", "latency_requests",
 ]
-TOTAL_FIELDS = ["date", "requests", "input_tokens", "output_tokens", "cost"]
+TOTAL_FIELDS = ["date", "requests", "input_tokens", "output_tokens", "total_tokens", "cost"]
 
 
 class UsageStore:
@@ -28,11 +29,17 @@ class UsageStore:
         k = (e["date"], e["user"], e["agent"], e["model"])
         r = self._daily.setdefault(
             k,
-            dict(requests=0, input_tokens=0, output_tokens=0, cost=0.0, unpriced_requests=0),
+            dict(requests=0, input_tokens=0, output_tokens=0, total_tokens=0,
+                 cost=0.0, unpriced_requests=0, latency_ms_total=0.0, latency_requests=0),
         )
         r["requests"] += 1
         r["input_tokens"] += e["input_tokens"]
         r["output_tokens"] += e["output_tokens"]
+        r["total_tokens"] += e["input_tokens"] + e["output_tokens"]
+        latency_ms = e.get("latency_ms")
+        if latency_ms is not None:
+            r["latency_ms_total"] += latency_ms
+            r["latency_requests"] += 1
         r["cost"] += e["cost"]
         if not e["priced"]:
             r["unpriced_requests"] += 1
@@ -106,7 +113,8 @@ class UsageStore:
                 dict(date=date, user=user, agent=agent, model=model,
                      **{**r, "cost": round(r["cost"], 6)})
             )
-            t = totals.setdefault(date, dict(requests=0, input_tokens=0, output_tokens=0, cost=0.0))
+            t = totals.setdefault(date, dict(requests=0, input_tokens=0, output_tokens=0,
+                                             total_tokens=0, cost=0.0))
             for k in t:
                 t[k] += r[k]
         self._write_csv(self.daily_path, DAILY_FIELDS, rows)
@@ -118,6 +126,9 @@ class UsageStore:
     def summary(self) -> list[dict]:
         with self._lock:
             return [
-                dict(date=d, user=u, agent=a, model=m, **{**r, "cost": round(r["cost"], 6)})
+                 dict(date=d, user=u, agent=a, model=m,
+                     **{**r, "cost": round(r["cost"], 6)},
+                     latency_ms_avg=(r["latency_ms_total"] / r["latency_requests"]
+                                  if r["latency_requests"] else None))
                 for (d, u, a, m), r in sorted(self._daily.items())
             ]

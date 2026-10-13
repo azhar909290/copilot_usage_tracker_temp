@@ -22,6 +22,24 @@ def event(key, username, input_tokens):
 
 
 class UsageStoreTests(unittest.TestCase):
+    def test_agent_totals_latency_and_legacy_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(directory)
+            planner = event("planner", "alice", 100)
+            planner.update(agent="Planner", latency_ms=250.0)
+            reviewer = event("reviewer", "alice", 200)
+            reviewer.update(agent="Reviewer", latency_ms=500.0)
+            legacy = event("legacy", "alice", 50)
+            legacy.update(agent="Planner")
+            self.assertEqual(store.add_events([planner, reviewer, legacy]), 3)
+            self.assertEqual(store.add_events([planner]), 0)
+            rows = {row["agent"]: row for row in store.summary()}
+            self.assertEqual(rows["Planner"]["total_tokens"], 170)
+            self.assertEqual(rows["Planner"]["latency_ms_avg"], 250.0)
+            self.assertEqual(rows["Reviewer"]["total_tokens"], 210)
+            self.assertEqual(rows["Reviewer"]["latency_ms_avg"], 500.0)
+            self.assertEqual(UsageStore(directory).summary(), store.summary())
+
     def test_delete_user_rebuilds_ledger_and_summaries(self):
         with tempfile.TemporaryDirectory() as directory:
             store = UsageStore(directory)

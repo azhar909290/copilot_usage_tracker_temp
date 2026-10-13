@@ -107,8 +107,14 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
             resp_model = a.get("gen_ai.response.model")
             key, cost = price_book.cost([resp_model, req_model], in_tok, out_tok)
 
+            start_ns = _to_int(s.get("startTimeUnixNano"))
+            end_ns = _to_int(s.get("endTimeUnixNano"))
+            latency_ms = (
+                (end_ns - start_ns) / 1e6
+                if start_ns > 0 and end_ns >= start_ns else None
+            )
             ts = datetime.fromtimestamp(
-                _to_int(s.get("startTimeUnixNano")) / 1e9, tz=timezone.utc
+                start_ns / 1e9, tz=timezone.utc
             )
             events.append(
                 {
@@ -123,6 +129,8 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                     "priced_as": key,
                     "input_tokens": in_tok,
                     "output_tokens": out_tok,
+                    "total_tokens": in_tok + out_tok,
+                    "latency_ms": latency_ms,
                     "cost": round(cost, 8) if cost is not None else 0.0,
                     "priced": cost is not None,
                 }

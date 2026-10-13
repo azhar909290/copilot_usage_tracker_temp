@@ -12,6 +12,43 @@ def attribute(key, value):
 
 
 class ParserTests(unittest.TestCase):
+    def test_named_agents_have_separate_llm_usage_and_latency(self):
+        spans = [{
+            "traceId": "agent-metrics", "spanId": "parent",
+            "attributes": [attribute("gen_ai.agent.name", "Planner"),
+                           attribute("gen_ai.operation.name", "invoke_agent"),
+                           attribute("gen_ai.usage.input_tokens", 999)],
+        }]
+        for span_id, agent_name, parent_id in (
+            ("planner-call", None, "parent"),
+            ("reviewer-call", "Reviewer", "parent"),
+        ):
+            attributes = [attribute("gen_ai.usage.input_tokens", 100),
+                          attribute("gen_ai.usage.output_tokens", 20),
+                          attribute("gen_ai.request.model", "test-model")]
+            if agent_name:
+                attributes.append(attribute("gen_ai.agent.name", agent_name))
+            spans.append({
+                "traceId": "agent-metrics", "spanId": span_id, "parentSpanId": parent_id,
+                "startTimeUnixNano": "1000000000", "endTimeUnixNano": "1250000000",
+                "attributes": attributes,
+            })
+        payload = {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+        events = parse_spans(payload, PriceBook())
+        self.assertEqual([item["agent"] for item in events], ["Planner", "Reviewer"])
+        self.assertEqual([item["total_tokens"] for item in events], [120, 120])
+        self.assertEqual([item["latency_ms"] for item in events], [250.0, 250.0])
+
+    def test_missing_or_invalid_end_timestamp_has_unknown_latency(self):
+        for end_ns in (None, "500000000"):
+            span = {"traceId": "latency", "spanId": "call",
+                    "startTimeUnixNano": "1000000000",
+                    "attributes": [attribute("gen_ai.usage.input_tokens", 1)]}
+            if end_ns is not None:
+                span["endTimeUnixNano"] = end_ns
+            payload = {"resourceSpans": [{"scopeSpans": [{"spans": [span]}]}]}
+            self.assertIsNone(parse_spans(payload, PriceBook())[0]["latency_ms"])
+
     def test_client_identities_are_not_replaced_by_server_default(self):
         payload = {"resourceSpans": []}
         for index, username in enumerate(("octocat", "another-user", None)):
