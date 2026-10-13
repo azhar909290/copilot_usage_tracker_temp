@@ -12,6 +12,42 @@ def attribute(key, value):
 
 
 class ParserTests(unittest.TestCase):
+    def test_plugin_mode_name_overrides_internal_llm_agent_name(self):
+        payload = {"resourceSpans": [{"scopeSpans": [{"spans": [
+            {
+                "traceId": "plugin-mode", "spanId": "parent",
+                "attributes": [attribute("gen_ai.operation.name", "invoke_agent"),
+                               attribute("gen_ai.agent.name", "GitHub Copilot Chat"),
+                               attribute("copilot_chat.mode_name", "Format-Agent"),
+                               attribute("gen_ai.usage.input_tokens", 100)],
+            },
+            {
+                "traceId": "plugin-mode", "spanId": "chat", "parentSpanId": "parent",
+                "attributes": [attribute("gen_ai.agent.name", "panel/editAgent"),
+                               attribute("gen_ai.usage.input_tokens", 100)],
+            },
+            {
+                "traceId": "plugin-mode", "spanId": "nested", "parentSpanId": "parent",
+                "attributes": [attribute("gen_ai.operation.name", "invoke_agent"),
+                               attribute("gen_ai.agent.name", "Reviewer")],
+            },
+            {
+                "traceId": "plugin-mode", "spanId": "nested-chat", "parentSpanId": "nested",
+                "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+            },
+        ]}]}]}
+        events = parse_spans(payload, PriceBook())
+        self.assertEqual([event["agent"] for event in events], ["Format-Agent", "Reviewer"])
+        self.assertEqual([event["input_tokens"] for event in events], [100, 50])
+        spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        for span in spans:
+            span["traceId"] = "plugin-mode-separate-batches"
+        payload["resourceSpans"][0]["scopeSpans"][0]["spans"] = spans[:1]
+        self.assertEqual(parse_spans(payload, PriceBook()), [])
+        payload["resourceSpans"][0]["scopeSpans"][0]["spans"] = spans[1:]
+        events = parse_spans(payload, PriceBook())
+        self.assertEqual([event["agent"] for event in events], ["Format-Agent", "Reviewer"])
+
     def test_named_agents_have_separate_llm_usage_and_latency(self):
         spans = [{
             "traceId": "agent-metrics", "spanId": "parent",

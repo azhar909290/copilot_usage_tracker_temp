@@ -27,8 +27,10 @@ Reload the VS Code window after changing these settings. Environment variables
 can override settings. These settings require a Copilot Chat version supporting
 OpenTelemetry. See the [official monitoring documentation](https://code.visualstudio.com/docs/copilot/guides/monitoring-agents).
 
-The tracker uses `gen_ai.agent.name` on the LLM span, or the nearest named ancestor
-available when the span is ingested. Parent `invoke_agent` token rollups are
+For Copilot custom agents, the tracker prefers `copilot_chat.mode_name` on the
+nearest available agent invocation over internal labels such as `panel/editAgent`.
+Otherwise it uses `gen_ai.agent.name` on the LLM span or an available ancestor.
+Parent `invoke_agent` token rollups are
 excluded to avoid counting the same tokens twice. Nested agents with distinct
 names are grouped separately, not charged to both parent and child.
 
@@ -37,6 +39,13 @@ by its markdown filename unless the runtime exports that identity. Spans without
 an agent name or an available named ancestor fall back to `service.name`. A parent
 that arrives in a later batch does not retroactively relabel existing events.
 For reliable custom-agent attribution, set the name on each LLM-call span.
+
+If a plugin agent is missing, check the GitHub Copilot Chat output for `[OTel]`
+initialization and export errors. Configure OTel in VS Code **User** settings;
+the installed extension defines these as application-scoped settings, so workspace
+settings are not sufficient. Keep the Azure collector URL for cloud reporting.
+Deploy receiver changes to Azure before expecting new attribution in the cloud;
+existing usage rows are not retroactively renamed by this parser change.
 
 Optional identity capture (`github.copilot.chat.otel.captureIdentity`) records
 developer identity; enable it only with appropriate consent and retention policy.

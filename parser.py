@@ -11,7 +11,7 @@ SKIP_OPERATIONS = set(
 )
 
 # span -> agent name cache across batches (children can arrive before/after parents)
-_AGENT_CACHE: "OrderedDict[str, str]" = OrderedDict()
+_AGENT_CACHE: "OrderedDict[str, tuple[str | None, str | None, bool]]" = OrderedDict()
 _CACHE_MAX = 50_000
 
 
@@ -35,8 +35,9 @@ def _to_int(x) -> int:
         return 0
 
 
-def _remember(trace_id: str, span_id: str, agent: str) -> None:
-    _AGENT_CACHE[f"{trace_id}:{span_id}"] = agent
+def _remember(trace_id: str, span_id: str, agent: str | None,
+              mode: str | None, is_invocation: bool) -> None:
+    _AGENT_CACHE[f"{trace_id}:{span_id}"] = (agent, mode, is_invocation)
     if len(_AGENT_CACHE) > _CACHE_MAX:
         _AGENT_CACHE.popitem(last=False)
 
@@ -60,24 +61,38 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
         for s in spans:
             a = attrs(s.get("attributes"))
             name = a.get("gen_ai.agent.name")
-            if name:
-                _remember(s.get("traceId", ""), s.get("spanId", ""), name)
+            mode = a.get("copilot_chat.mode_name")
+            is_invocation = a.get("gen_ai.operation.name") == "invoke_agent"
+            if name or mode or is_invocation:
+                _remember(s.get("traceId", ""), s.get("spanId", ""),
+                          name, mode, is_invocation)
 
         def resolve_agent(span: dict) -> str:
             cur, hops = span, 0
+            nearest_name = None
             while cur is not None and hops < 12:
                 cid = f"{cur.get('traceId','')}:{cur.get('spanId','')}"
                 if cid in _AGENT_CACHE:
-                    return _AGENT_CACHE[cid]
+                    name, mode, is_invocation = _AGENT_CACHE[cid]
+                    if mode:
+                        return mode
+                    nearest_name = nearest_name or name
+                    if is_invocation:
+                        return nearest_name or default_agent
                 pid = cur.get("parentSpanId")
                 if not pid:
                     break
                 pkey = f"{cur.get('traceId', '')}:{pid}"
                 if pkey in _AGENT_CACHE:
-                    return _AGENT_CACHE[pkey]
+                    name, mode, is_invocation = _AGENT_CACHE[pkey]
+                    if mode:
+                        return mode
+                    nearest_name = nearest_name or name
+                    if is_invocation:
+                        return nearest_name or default_agent
                 cur = by_id.get((cur.get("traceId", ""), pid))
                 hops += 1
-            return default_agent
+            return nearest_name or default_agent
 
         def resolve_user(span: dict) -> str:
             cur, hops = span, 0
