@@ -55,6 +55,9 @@ body {
 }
 
 button, input, select { font: inherit; }
+select { color-scheme: dark; }
+[data-theme="light"] select { color-scheme: light; }
+select option, select optgroup { color: var(--ink); background-color: var(--surface); }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #5488e855; outline-offset: 2px; }
 
@@ -343,6 +346,48 @@ body { background-image: linear-gradient(color-mix(in srgb, var(--line) 16%, tra
 .command-result:hover, .command-result:focus-visible { background: var(--surface-soft); }.command-result > svg { color: var(--accent); flex-shrink: 0; }.command-result > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }.command-result small { color: var(--muted); font: 10px var(--font-mono); }
 @media (prefers-reduced-motion: no-preference) { .content-wrap { animation: enter-dashboard 300ms ease both; } }
 @keyframes enter-dashboard { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.github-nav-link { text-decoration: none; }
+.github-topbar-label { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.github-tabs { display: flex; gap: 8px; margin-bottom: 24px; overflow-x: auto; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.github-tabs button { display: flex; align-items: center; gap: 8px; padding: 11px 14px; color: var(--muted); background: transparent; border: 0; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.github-tabs button.selected { color: var(--accent); background: var(--surface-soft); }
+.github-caption { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.github-report-note { display: flex; align-items: flex-start; gap: 13px; padding: 16px 18px; margin-bottom: 22px; color: var(--accent); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.github-report-note > svg { flex-shrink: 0; }
+.github-report-note strong { font-size: 12px; }
+.github-report-note p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.github-user { display: flex; align-items: center; gap: 10px; }
+.github-user a { display: flex; align-items: center; gap: 4px; color: var(--ink); text-decoration: none; }
+.github-user a:hover { color: var(--accent); }
+.github-user small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.github-tags { display: flex; flex-wrap: wrap; gap: 5px; max-width: 220px; min-width: 100px; }
+.github-tags span { padding: 3px 7px; border-radius: 4px; background: var(--surface-soft); color: var(--accent); font-size: 10px; }
+.github-table { min-width: 750px; }
+.github-daily-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(65px, 1fr)); gap: 8px; }
+.github-day { display: grid; gap: 8px; padding: 12px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; text-align: center; }
+.github-day span { color: var(--muted); font-size: 10px; }
+.github-day strong { color: var(--accent); font: 18px var(--font-mono); }
+.github-model-chart { margin: 24px 0; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.github-model-pie-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 24px; }
+.github-model-pie-canvas { height: 340px; min-width: 0; }
+.github-model-pie-legend { list-style: none; margin: 0; padding: 0; max-height: 340px; overflow-y: auto; }
+.github-model-pie-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 48px; align-items: center; gap: 10px; padding: 9px 0; font-size: 11px; }
+.github-model-pie-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.github-model-pie-name { overflow-wrap: anywhere; }
+.github-model-pie-legend strong, .github-model-pie-legend .github-caption { text-align: right; }
+@media (max-width: 900px) { .github-model-pie-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.github-credit-details { min-width: 135px; margin-top: 6px; font-size: 11px; }
+.github-credit-details summary { cursor: pointer; color: var(--accent); }
+.github-credit-details[open] { min-width: 290px; }
+.github-credit-details p, .github-credit-details caption { color: var(--muted); line-height: 1.6; font-size: 10px; max-width: 330px; margin-top: 10px; }
+.github-credit-details table { width: 100%; margin-top: 10px; }
+.github-credit-details th, .github-credit-details td { height: auto; padding: 6px; font-size: 10px; }
+@media (max-width: 620px) {
+	.github-shell .panel-heading { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+	.github-shell .page-footer { gap: 12px; flex-wrap: wrap; }
+	.github-tabs { gap: 2px; }.github-tabs button { padding: 10px; font-size: 12px; }
+}
 
 @media (max-width: 1180px) {
 	.content-wrap { padding-right: 26px; padding-left: 26px; }

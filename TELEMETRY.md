@@ -48,8 +48,24 @@ Deploy receiver changes to Azure before expecting new attribution in the cloud;
 existing usage rows are not retroactively renamed by this parser change.
 
 Optional identity capture (`github.copilot.chat.otel.captureIdentity`) records
-developer identity; enable it only with appropriate consent and retention policy.
+the authenticated account name, OS username, and machine hostname for Local
+harness sessions; enable it only with appropriate consent and retention policy.
 No prompt or response content is needed for usage tracking.
+
+If identity capture is disabled or managed settings prohibit enabling it, you
+can attribute usage with an explicitly supplied GitHub alias instead. Set the
+`OTEL_RESOURCE_ATTRIBUTES` environment variable for the VS Code process:
+
+```text
+OTEL_RESOURCE_ATTRIBUTES=user.name=octocat
+```
+
+This adds only the supplied `user.name` resource attribute; the tracker uses it
+to group usage by user. The tracker also accepts `enduser.id` and `user.id`.
+If your organization manages OTel resource attributes, its managed value
+overrides `OTEL_RESOURCE_ATTRIBUTES`, so ask your administrator to configure
+the approved alias there. This alternative does not enable machine identity
+capture.
 
 ## Custom Python Agents
 
