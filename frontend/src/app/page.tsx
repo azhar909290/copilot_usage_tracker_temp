@@ -11,6 +11,7 @@ import {
   Clock3,
   Command,
   Cpu,
+  GitBranch,
   LayoutDashboard,
   LoaderCircle,
   Moon,
@@ -32,7 +33,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useDashboardTheme } from "./theme";
 
 type UsageRow = {
   date: string;
@@ -120,23 +123,6 @@ const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = 
   { id: "activity", label: "Activity", icon: Activity },
 ];
 
-function subscribeTheme(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener("dashboard-theme", callback);
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener("dashboard-theme", callback);
-  };
-}
-
-function savedTheme() {
-  try {
-    return localStorage.getItem("signal-theme") === "light" ? "light" : "dark";
-  } catch {
-    return "dark";
-  }
-}
-
 export default function Home() {
   const [view, setView] = useState<View>("overview");
   const [period, setPeriod] = useState<Period>(30);
@@ -157,23 +143,7 @@ export default function Home() {
   const paletteRef = useRef<HTMLDialogElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  const [temporaryTheme, setTemporaryTheme] = useState<string | null>(null);
-  const storedTheme = useSyncExternalStore(subscribeTheme, savedTheme, () => "dark");
-  const theme = temporaryTheme ?? storedTheme;
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-
-  function toggleTheme() {
-    try {
-      localStorage.setItem("signal-theme", theme === "dark" ? "light" : "dark");
-      setTemporaryTheme(null);
-      window.dispatchEvent(new Event("dashboard-theme"));
-    } catch {
-      setTemporaryTheme(theme === "dark" ? "light" : "dark");
-    }
-  }
+  const { theme, toggleTheme } = useDashboardTheme();
 
   useEffect(() => {
     if (paletteOpen) paletteRef.current?.showModal();
@@ -404,6 +374,9 @@ export default function Home() {
               {id === "users" && <span className="nav-count">{userNames.length}</span>}
             </button>
           ))}
+          <Link className="nav-item github-nav-link" href="/github-metrics" aria-label="GitHub Metrics" title="GitHub Metrics">
+            <GitBranch size={18} strokeWidth={1.8} /><span>GitHub Metrics</span>
+          </Link>
         </nav>
 
         <div className="sidebar-bottom">

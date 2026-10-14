@@ -16,6 +16,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 )
 
 from parser import parse_spans
+from github_metrics import GitHubMetrics, GitHubMetricsError
 from marketplace import MarketplaceCatalog
 from pricing import PriceBook
 from store import UsageStore
@@ -31,6 +32,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "Usage", "description": "Aggregated usage and cost reports."},
         {"name": "Agents", "description": "Marketplace catalog and agent usage."},
+        {"name": "GitHub", "description": "Organization Copilot metrics."},
         {"name": "System", "description": "Service health checks."},
         {"name": "OpenTelemetry", "description": "OpenTelemetry ingestion endpoints."},
     ],
@@ -53,6 +55,7 @@ app.add_middleware(
 prices = PriceBook()
 store = UsageStore(os.getenv("DATA_DIR", "data"))
 marketplace = MarketplaceCatalog(os.path.join(store.dir, "marketplace_cache.json"))
+github_metrics = GitHubMetrics()
 
 
 @app.middleware("http")
@@ -74,6 +77,8 @@ async def log_http_request(request: Request, call_next):
 
     duration_ms = (time.perf_counter() - started) * 1000
     response.headers["X-Request-ID"] = request_id
+    if request.url.path == "/api/v1/github/metrics":
+        response.headers["Cache-Control"] = "private, no-store"
     log.info(
         "http_request request_id=%s method=%s path=%s status=%d duration_ms=%.2f",
         request_id,
@@ -171,6 +176,20 @@ def delete_user_usage(username: str, authorization: str | None = Header(default=
 )
 def agents():
     return marketplace.get()
+
+
+@app.get(
+    "/api/v1/github/metrics",
+    name="get_github_metrics",
+    operation_id="get_github_metrics",
+    tags=["GitHub"],
+)
+def get_github_metrics():
+    try:
+        return github_metrics.get()
+    except GitHubMetricsError as error:
+        log.warning("github_metrics_unavailable error=%s", error)
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/health", include_in_schema=False)
