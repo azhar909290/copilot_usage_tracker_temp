@@ -47,6 +47,40 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(agents[0]["name"], "Project-Documenter")
         self.assertEqual(agents[0]["plugin_name"], "Document Tools")
         self.assertEqual(agents[0]["version"], "2.1.0")
+        self.assertEqual(agents[0]["kind"], "agent")
+
+    def test_includes_skill_only_plugins_in_catalog(self):
+        json_payloads = {
+            "https://example.test/marketplace.json": {
+                "plugins": [
+                    {
+                        "id": "review-skills",
+                        "name": "Review Skills",
+                        "path": "Plugins/review-skills/plugin.json",
+                    }
+                ]
+            },
+            "https://example.test/Plugins/review-skills/plugin.json": {
+                "name": "review-skills",
+                "displayName": "Review Skills",
+                "description": "Skills for reviewing code.",
+                "version": "1.2.0",
+                "components": {
+                    "agents": [],
+                    "skills": ["skills/diff-review", "skills/logic-check"],
+                },
+            },
+        }
+        with patch.object(marketplace, "_fetch_json", side_effect=json_payloads.__getitem__):
+            entries = marketplace._load_agents(
+                "https://example.test/marketplace.json",
+                "https://example.test/",
+            )
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["name"], "Review Skills")
+        self.assertEqual(entries[0]["kind"], "skill_package")
+        self.assertEqual(entries[0]["skills"], ["skills/diff-review", "skills/logic-check"])
 
     def test_invalid_agent_error_identifies_source_file(self):
         json_payloads = [

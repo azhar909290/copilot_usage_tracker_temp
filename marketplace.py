@@ -95,10 +95,13 @@ def _load_agents(source_url: str, repository_root: str | None = None) -> list[di
         agent_paths = components.get("agents", []) if isinstance(components, dict) else []
         if not isinstance(agent_paths, list):
             raise ValueError(f"Plugin {plugin.get('name', '')!r} agents must be a list")
+        skill_paths = components.get("skills", []) if isinstance(components, dict) else []
+        if not isinstance(skill_paths, list):
+            raise ValueError(f"Plugin {plugin.get('name', '')!r} skills must be a list")
+        agent_paths = [path for path in agent_paths if isinstance(path, str)]
+        skill_paths = [path for path in skill_paths if isinstance(path, str)]
 
         for agent_path in agent_paths:
-            if not isinstance(agent_path, str):
-                continue
             agent_url = _relative_url(manifest_url, agent_path)
             markdown = _fetch_text(agent_url)
             try:
@@ -119,6 +122,33 @@ def _load_agents(source_url: str, repository_root: str | None = None) -> list[di
                     ),
                     "version": str(plugin.get("version") or manifest.get("version") or ""),
                     "path": agent_path,
+                    "kind": "agent",
+                    "skills": [],
+                }
+            )
+        if not agent_paths and skill_paths:
+            name = str(
+                manifest.get("displayName")
+                or plugin.get("displayName")
+                or manifest.get("name")
+                or plugin.get("name")
+                or Path(str(manifest_path)).parent.name
+            )
+            agents.append(
+                {
+                    "id": str(plugin.get("id") or manifest.get("name") or name),
+                    "name": name,
+                    "description": str(
+                        manifest.get("description") or plugin.get("description") or ""
+                    ),
+                    "plugin_id": str(plugin.get("id") or plugin.get("name") or ""),
+                    "plugin_name": str(
+                        plugin.get("displayName") or plugin.get("name") or name
+                    ),
+                    "version": str(plugin.get("version") or manifest.get("version") or ""),
+                    "path": str(manifest_path),
+                    "kind": "skill_package",
+                    "skills": skill_paths,
                 }
             )
     return agents
