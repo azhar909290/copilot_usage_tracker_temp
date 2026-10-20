@@ -57,6 +57,8 @@ type CatalogAgent = {
   plugin_name: string;
   version: string;
   path: string;
+  kind?: "agent" | "skill_package";
+  skills?: string[];
 };
 
 type CatalogResponse = {
@@ -118,7 +120,7 @@ function getCsvValue(value: string | number) {
 const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Command Center", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
-  { id: "agents", label: "Agents", icon: Bot },
+  { id: "agents", label: "Catalog", icon: Boxes },
   { id: "models", label: "Models", icon: Cpu },
   { id: "activity", label: "Activity", icon: Activity },
 ];
@@ -581,7 +583,7 @@ export default function Home() {
 
           {view === "agents" && (
             <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">MARKETPLACE INVENTORY</div><h2>Agents and tracked usage</h2></div><span className="inventory-count">{catalog?.agents.length ?? 0} LISTED</span></div>
+              <div className="panel-heading"><div><div className="section-kicker">MARKETPLACE INVENTORY</div><h2>Agents, skill packages, and tracked usage</h2></div><span className="inventory-count">{catalog?.agents.length ?? 0} ITEMS LISTED</span></div>
               <AgentTable agents={catalog?.agents || []} usage={filteredRows} currency={currency} />
               {!!catalog?.error && <p className="table-note">Catalog refresh issue: {catalog.error}</p>}
             </section>
@@ -674,17 +676,18 @@ function AgentTable({ agents, usage, currency, compact = false }: { agents: Cata
     .sort((a, b) => b[1].requests - a[1].requests);
   const visibleUnlisted = compact ? unlistedAgents.slice(0, 4) : unlistedAgents;
   return (
-    <div className="table-scroll"><table className="data-table agent-table"><thead><tr><th>AGENT</th><th>PLUGIN</th><th>CALLS</th><th>TOKENS</th><th>EST. COST</th><th>STATUS</th></tr></thead><tbody>
+    <div className="table-scroll"><table className="data-table agent-table"><thead><tr><th>AGENT / PACKAGE</th><th>PLUGIN</th><th>CALLS</th><th>TOKENS</th><th>EST. COST</th><th>STATUS</th></tr></thead><tbody>
       {visibleAgents.map((agent, index) => {
-        const key = [agent.name, agent.id]
+        const isSkillPackage = agent.kind === "skill_package";
+        const key = isSkillPackage ? undefined : [agent.name, agent.id]
           .map((candidate) => candidate.trim().toLocaleLowerCase())
           .find((candidate) => metrics.has(candidate));
         const measure = key ? metrics.get(key) : undefined;
         return <tr key={`${agent.plugin_id}-${agent.id}-${index}`}>
-          <td><span className={`agent-avatar agent-avatar-${index % 4}`}><Bot size={16} /></span><span className="agent-name-cell"><strong>{agent.name}</strong><small>{agent.description}</small></span></td>
+          <td><span className={`agent-avatar agent-avatar-${index % 4}`}>{isSkillPackage ? <Boxes size={16} /> : <Bot size={16} />}</span><span className="agent-name-cell"><strong>{agent.name}</strong><small>{isSkillPackage ? `Skill package · ${agent.skills?.length ?? 0} skills` : agent.description}</small>{isSkillPackage && !!agent.skills?.length && <small title={agent.skills.join(", ")}>{agent.skills.join(", ")}</small>}</span></td>
           <td><span className="plugin-name">{agent.plugin_name || agent.plugin_id || "—"}</span><small className="plugin-version">{agent.version ? `v${agent.version}` : ""}</small></td>
-          <td>{formatCount(measure?.requests || 0)}</td><td>{formatCompact(measure?.tokens || 0)}</td><td>{formatMoney(measure?.cost || 0, currency)}</td>
-          <td><span className={`usage-badge ${measure ? "used" : "unused"}`}><span />{measure ? "Tracked" : "No usage"}</span></td>
+          <td>{isSkillPackage ? "—" : formatCount(measure?.requests || 0)}</td><td>{isSkillPackage ? "—" : formatCompact(measure?.tokens || 0)}</td><td>{isSkillPackage ? "—" : formatMoney(measure?.cost || 0, currency)}</td>
+          <td><span className={`usage-badge ${isSkillPackage ? "unused" : measure ? "used" : "unused"}`}><span />{isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage"}</span></td>
         </tr>;
       })}
       {visibleUnlisted.map(([key, measure]) => <tr key={`tracked-${key}`}>
