@@ -58,6 +58,8 @@ class AgentTelemetryTests(unittest.TestCase):
                     self.assertEqual(row["input_tokens"], 100)
                     self.assertEqual(row["output_tokens"], 20)
                     self.assertEqual(row["total_tokens"], 120)
+                    self.assertIsNotNone(row["first_seen"])
+                    self.assertEqual(row["first_seen"], row["last_seen"])
                     self.assertGreaterEqual(row["latency_ms_avg"], 0)
                     self.assertAlmostEqual(row["cost"], 0.000119)
                 asyncio.run(server.traces(request))

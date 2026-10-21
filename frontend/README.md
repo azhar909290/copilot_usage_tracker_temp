@@ -64,6 +64,14 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 The overview includes call, token, estimated-cost, and unpriced-call totals; token trends; model mix; and agent activity. The Agents, Models, and Activity views share date, agent, model, and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
 
+Activity rows remain daily aggregates, with first and last call timestamps shown
+in the browser's local timezone. Recent activity shows and sorts by the last call
+time. CSV exports include UTC `first_seen` and `last_seen` timestamps. The daily
+grouping date still uses the receiver's `DAILY_TZ` (UTC by default). Older events
+without timestamps display "Time unavailable". User labels come from client
+telemetry, not a dashboard login; GitHub aliases, OS-style labels, and `unknown`
+are not automatically merged. See [identity attribution](../TELEMETRY.md#why-several-user-names-can-appear).
+
 For an optimized build, run from `frontend/`:
 
 ```bash

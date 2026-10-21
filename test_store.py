@@ -22,6 +22,34 @@ def event(key, username, input_tokens):
 
 
 class UsageStoreTests(unittest.TestCase):
+    def test_daily_call_times_use_event_timestamps_and_survive_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(directory)
+            first = event("first", "alice", 100)
+            first["timestamp"] = "2026-10-09T12:00:00+05:30"
+            last = event("last", "alice", 200)
+            last["timestamp"] = "2026-10-09T08:00:00+00:00"
+            legacy = event("legacy", "alice", 50)
+            store.add_events([last, legacy, first])
+            row = store.summary()[0]
+            self.assertEqual(row["first_seen"], "2026-10-09T06:30:00+00:00")
+            self.assertEqual(row["last_seen"], "2026-10-09T08:00:00+00:00")
+            self.assertEqual(row["requests"], 3)
+            self.assertEqual(row["total_tokens"], 380)
+            self.assertEqual(UsageStore(directory).summary(), [row])
+            with open(store.daily_path, newline="", encoding="utf-8") as source:
+                csv_row = next(csv.DictReader(source))
+            self.assertEqual(csv_row["first_seen"], row["first_seen"])
+            self.assertEqual(csv_row["last_seen"], row["last_seen"])
+
+    def test_legacy_events_do_not_invent_call_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(directory)
+            store.add_events([event("legacy", "alice", 100)])
+            row = store.summary()[0]
+            self.assertIsNone(row["first_seen"])
+            self.assertIsNone(row["last_seen"])
+
     def test_agent_totals_latency_and_legacy_replay(self):
         with tempfile.TemporaryDirectory() as directory:
             store = UsageStore(directory)

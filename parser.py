@@ -12,6 +12,7 @@ SKIP_OPERATIONS = set(
 
 # span -> agent name cache across batches (children can arrive before/after parents)
 _AGENT_CACHE: "OrderedDict[str, tuple[str | None, str | None, bool]]" = OrderedDict()
+_USER_CACHE: "OrderedDict[str, tuple[str | None, str | None]]" = OrderedDict()
 _CACHE_MAX = 50_000
 
 
@@ -44,6 +45,18 @@ def _remember(trace_id: str, span_id: str, agent: str | None,
 
 def parse_spans(payload: dict, price_book) -> list[dict]:
     events: list[dict] = []
+    # Identity-bearing parents can be in another resource group or earlier batch.
+    for rs in payload.get("resourceSpans", []):
+        for ss in rs.get("scopeSpans", []):
+            for s in ss.get("spans", []):
+                a = attrs(s.get("attributes"))
+                user = a.get("user.name") or a.get("enduser.id") or a.get("user.id")
+                key = f"{s.get('traceId', '')}:{s.get('spanId', '')}"
+                _USER_CACHE[key] = (str(user) if user else None, s.get("parentSpanId"))
+                _USER_CACHE.move_to_end(key)
+                if len(_USER_CACHE) > _CACHE_MAX:
+                    _USER_CACHE.popitem(last=False)
+
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
         resource_user = (
@@ -95,17 +108,16 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
             return nearest_name or default_agent
 
         def resolve_user(span: dict) -> str:
-            cur, hops = span, 0
-            while cur is not None and hops < 12:
-                a = attrs(cur.get("attributes"))
-                user = a.get("user.name") or a.get("enduser.id") or a.get("user.id")
+            trace_id, span_id = span.get("traceId", ""), span.get("spanId", "")
+            for _ in range(12):
+                user, parent_id = _USER_CACHE.get(
+                    f"{trace_id}:{span_id}", (None, None)
+                )
                 if user:
-                    return str(user)
-                pid = cur.get("parentSpanId")
-                if not pid:
+                    return user
+                if not parent_id:
                     break
-                cur = by_id.get((cur.get("traceId", ""), pid))
-                hops += 1
+                span_id = parent_id
             return str(resource_user)
 
         # 2) build events from spans that carry token usage

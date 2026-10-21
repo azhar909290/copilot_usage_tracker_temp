@@ -3,12 +3,14 @@ import csv
 import json
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
     "requests", "input_tokens", "output_tokens", "total_tokens", "cost", "unpriced_requests",
     "latency_ms_total", "latency_requests",
+    "first_seen", "last_seen",
 ]
 TOTAL_FIELDS = ["date", "requests", "input_tokens", "output_tokens", "total_tokens", "cost"]
 
@@ -30,8 +32,16 @@ class UsageStore:
         r = self._daily.setdefault(
             k,
             dict(requests=0, input_tokens=0, output_tokens=0, total_tokens=0,
-                 cost=0.0, unpriced_requests=0, latency_ms_total=0.0, latency_requests=0),
+                 cost=0.0, unpriced_requests=0, latency_ms_total=0.0, latency_requests=0,
+                 first_seen=None, last_seen=None),
         )
+        if e.get("timestamp"):
+            timestamp = datetime.fromisoformat(e["timestamp"])
+            if timestamp.tzinfo is None:
+                raise ValueError("Usage event timestamp must include a timezone")
+            timestamp = timestamp.astimezone(timezone.utc).isoformat()
+            r["first_seen"] = min(r["first_seen"] or timestamp, timestamp)
+            r["last_seen"] = max(r["last_seen"] or timestamp, timestamp)
         r["requests"] += 1
         r["input_tokens"] += e["input_tokens"]
         r["output_tokens"] += e["output_tokens"]

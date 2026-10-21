@@ -220,7 +220,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .recent-copy small { overflow: hidden; color: #939b94; font-size: 9px; text-overflow: ellipsis; }
 .recent-tokens { color: #536057; font: 10px var(--font-mono); }.recent-tokens small { color: #9ca29b; font: 9px var(--font-ui); }
 .recent-cost { width: 74px; color: #5c695f; font: 10px var(--font-mono); text-align: right; }
-.recent-row time { width: 60px; color: #969d96; font-size: 9px; text-align: right; }
+.recent-row time { width: clamp(100px, 18vw, 180px); flex-shrink: 0; color: #969d96; font-size: 9px; text-align: right; }
 .empty-state { min-height: 140px; display: flex; align-items: center; justify-content: center; gap: 9px; color: #989f98; font-size: 11px; }
 .empty-dash { color: #a7b77f; font-size: 22px; }
 .page-footer { display: flex; justify-content: space-between; padding: 13px 2px 0; color: #8b938b; font: 8px var(--font-mono); }

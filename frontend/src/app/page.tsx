@@ -39,6 +39,8 @@ import { useDashboardTheme } from "./theme";
 
 type UsageRow = {
   date: string;
+  first_seen?: string | null;
+  last_seen?: string | null;
   user: string;
   agent: string;
   model: string;
@@ -112,7 +114,20 @@ function displayDate(date: string, options?: Intl.DateTimeFormatOptions) {
   return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", options);
 }
 
-function getCsvValue(value: string | number) {
+function displayCallTime(timestamp: string | null | undefined) {
+  if (!timestamp) return "Time unavailable";
+  return new Date(timestamp).toLocaleString("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+  });
+}
+
+function compareLatest(a: UsageRow, b: UsageRow) {
+  return Date.parse(b.last_seen || `${b.date}T00:00:00Z`) -
+    Date.parse(a.last_seen || `${a.date}T00:00:00Z`);
+}
+
+function getCsvValue(value: string | number | null | undefined) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
 }
@@ -325,6 +340,8 @@ export default function Home() {
   function exportCsv() {
     const columns: (keyof UsageRow)[] = [
       "date",
+      "first_seen",
+      "last_seen",
       "user",
       "agent",
       "model",
@@ -701,11 +718,11 @@ function AgentTable({ agents, usage, currency, compact = false }: { agents: Cata
 }
 
 function RecentActivity({ rows, onViewAll }: { rows: UsageRow[]; onViewAll: () => void }) {
-  const recent = [...rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const recent = [...rows].sort(compareLatest).slice(0, 5);
   return (
     <section className="recent-section">
       <div className="panel-heading"><div><div className="section-kicker">LATEST RECORDED</div><h2>Recent activity</h2></div><button className="text-link" onClick={onViewAll} type="button">Full activity <ArrowUpRight size={13} /></button></div>
-      {recent.length ? <div className="recent-list">{recent.map((row, index) => <div className="recent-row" key={`${row.date}-${row.agent}-${row.model}-${index}`}><span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span><div className="recent-copy"><strong>{row.agent}</strong><small>{row.model} · {row.user}</small></div><span className="recent-tokens">{formatCompact(row.input_tokens + row.output_tokens)} <small>tokens</small></span><span className="recent-cost">${row.cost.toFixed(4)}</span><time>{displayDate(row.date, { month: "short", day: "numeric" })}</time></div>)}</div> : <EmptyState loading={false} label="No activity found for these filters." />}
+      {recent.length ? <div className="recent-list">{recent.map((row, index) => <div className="recent-row" key={`${row.date}-${row.agent}-${row.model}-${index}`}><span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span><div className="recent-copy"><strong>{row.agent}</strong><small>{row.model} · {row.user}</small></div><span className="recent-tokens">{formatCompact(row.input_tokens + row.output_tokens)} <small>tokens</small></span><span className="recent-cost">${row.cost.toFixed(4)}</span><time dateTime={row.last_seen || undefined} title="Last call (local time)">{row.last_seen ? displayCallTime(row.last_seen) : `${displayDate(row.date, { month: "short", day: "numeric" })} — Time unavailable`}</time></div>)}</div> : <EmptyState loading={false} label="No activity found for these filters." />}
     </section>
   );
 }
@@ -736,8 +753,8 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
 }
 
 function ActivityTable({ rows, loading, currency }: { rows: UsageRow[]; loading: boolean; currency: string }) {
-  const sortedRows = [...rows].sort((a, b) => b.date.localeCompare(a.date));
-  return <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">EVENT LEDGER</div><h2>Recorded requests</h2></div><span className="inventory-count">{formatCount(rows.length)} ROWS</span></div>
-    <div className="table-scroll"><table className="data-table"><thead><tr><th>DATE</th><th>USER</th><th>AGENT</th><th>MODEL</th><th>CALLS</th><th>INPUT</th><th>OUTPUT</th><th>COST</th></tr></thead><tbody>{sortedRows.map((row, index) => <tr key={`${row.date}-${row.user}-${row.agent}-${row.model}-${index}`}><td>{displayDate(row.date, { month: "short", day: "numeric", year: "numeric" })}</td><td>{row.user}</td><td>{row.agent}</td><td>{row.model}</td><td>{formatCount(row.requests)}</td><td>{formatCount(row.input_tokens)}</td><td>{formatCount(row.output_tokens)}</td><td>{formatMoney(row.cost, currency)}</td></tr>)}</tbody></table>{!rows.length && <EmptyState loading={loading} label="No activity in this date range." />}</div>
+  const sortedRows = [...rows].sort(compareLatest);
+  return <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">DAILY TOTALS</div><h2>Recorded requests</h2></div><span className="inventory-count">{formatCount(rows.length)} ROWS</span></div>
+    <div className="table-scroll"><table className="data-table"><thead><tr><th>DATE</th><th>FIRST CALL (LOCAL)</th><th>LAST CALL (LOCAL)</th><th>USER</th><th>AGENT</th><th>MODEL</th><th>CALLS</th><th>INPUT</th><th>OUTPUT</th><th>COST</th></tr></thead><tbody>{sortedRows.map((row, index) => <tr key={`${row.date}-${row.user}-${row.agent}-${row.model}-${index}`}><td>{displayDate(row.date, { month: "short", day: "numeric", year: "numeric" })}</td><td><time dateTime={row.first_seen || undefined}>{displayCallTime(row.first_seen)}</time></td><td><time dateTime={row.last_seen || undefined}>{displayCallTime(row.last_seen)}</time></td><td>{row.user}</td><td>{row.agent}</td><td>{row.model}</td><td>{formatCount(row.requests)}</td><td>{formatCount(row.input_tokens)}</td><td>{formatCount(row.output_tokens)}</td><td>{formatMoney(row.cost, currency)}</td></tr>)}</tbody></table>{!rows.length && <EmptyState loading={loading} label="No activity in this date range." />}</div>
   </section>;
 }

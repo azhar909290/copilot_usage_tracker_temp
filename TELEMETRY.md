@@ -67,6 +67,29 @@ overrides `OTEL_RESOURCE_ATTRIBUTES`, so ask your administrator to configure
 the approved alias there. This alternative does not enable machine identity
 capture.
 
+### Why several user names can appear
+
+`azhar909290` is a GitHub account name, while `azharudeens` matches the local
+Linux/WSL account name. These are different identity namespaces, not two GitHub
+accounts. The receiver does not use `process.user.name` as a GitHub identity.
+An OS-style name in the User column means that name was previously stored or
+supplied through `user.name`, `enduser.id`, or `user.id`; the ledger alone cannot
+prove which client configuration supplied it.
+
+The receiver prefers identity on a call or its ancestor spans, then the resource
+identity. Ancestor identity can be inherited across resource groups in the same
+request and earlier batches while the trace-scoped, bounded in-memory cache is
+available. A parent arriving in a later request does not retroactively update
+stored events; restarting the receiver clears this cache. `unknown` means no
+supported identity was available. Existing labels remain separate and are not
+automatically merged or assigned to a GitHub account.
+
+Seeing three labels does not by itself prove duplicate accounting. Event keys
+are trace ID plus span ID, and parent `invoke_agent` rollups are excluded by
+default. Verify actual event keys before treating separate rows as duplicates.
+For new calls, enable approved identity capture or configure the explicit GitHub
+alias above on each emitting client. Neither option relabels historical rows.
+
 ## Custom Python Agents
 
 Install the project dependencies into the agent's Python environment. Create one
@@ -99,6 +122,13 @@ Omit `endpoint` to use the SDK's standard OTLP environment configuration.
 Read `http://localhost:4318/api/v1/usage`. Rows are grouped by date, user, agent,
 and model and include `requests`, `input_tokens`, `output_tokens`, `total_tokens`,
 `cost`, `latency_ms_total`, `latency_requests`, and `latency_ms_avg`.
+Rows also include `first_seen` and `last_seen`: the earliest and latest call
+start timestamps in each daily group, normalized to UTC. These fields are also
+included in `daily_usage.csv` and dashboard CSV exports. The Activity table
+displays both in the browser's local timezone, and Recent activity shows the
+last call time and sorts by it. Daily grouping still uses `DAILY_TZ` (UTC by
+default), so the local call date may differ from the group's date. Historical
+events without timestamps show "Time unavailable"; no midnight time is invented.
 The latency average includes only spans with valid start and end timestamps;
 it is LLM-call latency, not total agent execution time. Old ledger entries still
 work and do not contribute unknown latency as zero.

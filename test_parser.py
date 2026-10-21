@@ -12,6 +12,56 @@ def attribute(key, value):
 
 
 class ParserTests(unittest.TestCase):
+    def test_identity_inherits_across_batches_and_unnamed_intermediate_spans(self):
+        parent = {
+            "traceId": "identity-batches", "spanId": "root",
+            "attributes": [attribute("gen_ai.operation.name", "invoke_agent"),
+                           attribute("user.name", "azhar909290")],
+        }
+        intermediate = {
+            "traceId": "identity-batches", "spanId": "tool", "parentSpanId": "root",
+        }
+        child = {
+            "traceId": "identity-batches", "spanId": "chat", "parentSpanId": "tool",
+            "attributes": [attribute("gen_ai.usage.input_tokens", 120)],
+        }
+        def payload(spans):
+            return {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+
+        self.assertEqual(parse_spans(payload([parent, intermediate]), PriceBook()), [])
+        events = parse_spans(payload([child]), PriceBook())
+        self.assertEqual(events[0]["user"], "azhar909290")
+
+        child["traceId"] = "unrelated-identity-trace"
+        self.assertEqual(parse_spans(payload([child]), PriceBook())[0]["user"], "unknown")
+
+    def test_identity_inherits_across_resources_even_when_parent_is_last(self):
+        child = {
+            "traceId": "identity-resources", "spanId": "child", "parentSpanId": "root",
+            "attributes": [attribute("gen_ai.usage.input_tokens", 100)],
+        }
+        parent = {
+            "traceId": "identity-resources", "spanId": "root",
+            "attributes": [attribute("user.name", "azhar909290")],
+        }
+        payload = {"resourceSpans": [
+            {"scopeSpans": [{"spans": [child]}]},
+            {"scopeSpans": [{"spans": [parent]}]},
+        ]}
+        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "azhar909290")
+        child["attributes"].append(attribute("user.name", "another-user"))
+        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "another-user")
+
+    def test_os_identity_is_not_used_as_github_identity(self):
+        payload = {"resourceSpans": [{
+            "resource": {"attributes": [attribute("process.user.name", "azharudeens")]},
+            "scopeSpans": [{"spans": [{
+                "traceId": "os-only", "spanId": "chat",
+                "attributes": [attribute("gen_ai.usage.input_tokens", 100)],
+            }]}],
+        }]}
+        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "unknown")
+
     def test_plugin_mode_name_overrides_internal_llm_agent_name(self):
         payload = {"resourceSpans": [{"scopeSpans": [{"spans": [
             {
