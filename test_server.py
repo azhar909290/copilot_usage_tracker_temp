@@ -1,5 +1,6 @@
 import asyncio
 import os
+import runpy
 import tempfile
 import threading
 import unittest
@@ -11,6 +12,69 @@ from fastapi import HTTPException
 import server
 from store import UsageStore
 from telemetry import AgentTelemetry
+
+
+class AzureMonitorStartupTests(unittest.TestCase):
+    def test_configures_monitor_before_creating_fastapi_app(self):
+        connection_string = "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+        with (
+            patch.dict(os.environ, {
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": f" {connection_string} ",
+            }, clear=True),
+            patch("dotenv.load_dotenv"),
+            patch("azure.monitor.opentelemetry.configure_azure_monitor") as configure,
+            patch(
+                "opentelemetry.instrumentation.fastapi.FastAPIInstrumentor.instrument_app"
+            ) as instrument_app,
+            patch("fastapi.FastAPI", wraps=server.FastAPI) as create_app,
+        ):
+            calls = Mock()
+            calls.attach_mock(configure, "configure")
+            calls.attach_mock(create_app, "create_app")
+            namespace = runpy.run_path(server.__file__)
+
+        configure.assert_called_once_with(
+            connection_string=connection_string,
+            logger_name="usage_api",
+        )
+        self.assertEqual([call[0] for call in calls.mock_calls], ["configure", "create_app"])
+        self.assertIsInstance(namespace["app"], server.FastAPI)
+        instrument_app.assert_called_once_with(namespace["app"])
+
+    def test_monitor_is_optional_without_a_connection_string(self):
+        for value in (None, "", "   "):
+            environment = {} if value is None else {
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": value,
+            }
+            with (
+                self.subTest(value=value),
+                patch.dict(os.environ, environment, clear=True),
+                patch("dotenv.load_dotenv"),
+                patch("azure.monitor.opentelemetry.configure_azure_monitor") as configure,
+                patch(
+                    "opentelemetry.instrumentation.fastapi.FastAPIInstrumentor.instrument_app"
+                ) as instrument_app,
+            ):
+                namespace = runpy.run_path(server.__file__)
+                configure.assert_not_called()
+                instrument_app.assert_not_called()
+                self.assertIsInstance(namespace["app"], server.FastAPI)
+
+    def test_monitor_configuration_errors_fail_startup(self):
+        with (
+            patch.dict(os.environ, {
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": "invalid",
+            }, clear=True),
+            patch("dotenv.load_dotenv"),
+            patch(
+                "azure.monitor.opentelemetry.configure_azure_monitor",
+                side_effect=ValueError("Invalid connection string"),
+            ),
+            patch("fastapi.FastAPI") as create_app,
+        ):
+            with self.assertRaisesRegex(ValueError, "Invalid connection string"):
+                runpy.run_path(server.__file__)
+            create_app.assert_not_called()
 
 
 class AgentTelemetryTests(unittest.TestCase):
