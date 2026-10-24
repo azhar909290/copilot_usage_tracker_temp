@@ -7,10 +7,12 @@ import os
 import time
 import uuid
 
+from azure.monitor.opentelemetry import configure_azure_monitor
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from google.protobuf.json_format import MessageToDict
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
@@ -26,6 +28,17 @@ load_dotenv()
 log = logging.getLogger("usage_api")
 logging.basicConfig(level=logging.INFO)
 
+applicationinsights_connection_string = os.getenv(
+    "APPLICATIONINSIGHTS_CONNECTION_STRING", ""
+).strip()
+if applicationinsights_connection_string:
+    configure_azure_monitor(
+        connection_string=applicationinsights_connection_string,
+        logger_name="usage_api",
+    )
+else:
+    log.info("Azure Monitor disabled: APPLICATIONINSIGHTS_CONNECTION_STRING is not set")
+
 app = FastAPI(
     title="Copilot Usage API",
     version="1.0.0",
@@ -37,6 +50,9 @@ app = FastAPI(
         {"name": "OpenTelemetry", "description": "OpenTelemetry ingestion endpoints."},
     ],
 )
+if applicationinsights_connection_string:
+    FastAPIInstrumentor.instrument_app(app)
+
 frontend_origins = [
     origin.strip()
     for origin in os.getenv(
