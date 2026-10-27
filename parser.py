@@ -13,7 +13,31 @@ SKIP_OPERATIONS = set(
 # span -> agent name cache across batches (children can arrive before/after parents)
 _AGENT_CACHE: "OrderedDict[str, tuple[str | None, str | None, bool]]" = OrderedDict()
 _USER_CACHE: "OrderedDict[str, tuple[str | None, str | None]]" = OrderedDict()
+_TRACE_USER_CACHE: "OrderedDict[str, str]" = OrderedDict()
 _CACHE_MAX = 50_000
+
+USER_ATTR_KEYS = (
+    "user.name",
+    "enduser.id",
+    "user.id",
+    "github.actor",
+    "github.user.login",
+    "github.user",
+    "actor.login",
+    "user.login",
+    "enduser.pseudo.id",
+    "copilot.user",
+)
+
+
+def _extract_user(a: dict) -> str | None:
+    if not a:
+        return None
+    for k in USER_ATTR_KEYS:
+        val = a.get(k)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return None
 
 
 def _val(v: dict):
@@ -50,21 +74,23 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
         for ss in rs.get("scopeSpans", []):
             for s in ss.get("spans", []):
                 a = attrs(s.get("attributes"))
-                user = a.get("user.name") or a.get("enduser.id") or a.get("user.id")
-                key = f"{s.get('traceId', '')}:{s.get('spanId', '')}"
-                _USER_CACHE[key] = (str(user) if user else None, s.get("parentSpanId"))
+                user = _extract_user(a)
+                trace_id = s.get("traceId", "")
+                span_id = s.get("spanId", "")
+                key = f"{trace_id}:{span_id}"
+                _USER_CACHE[key] = (user, s.get("parentSpanId"))
                 _USER_CACHE.move_to_end(key)
                 if len(_USER_CACHE) > _CACHE_MAX:
                     _USER_CACHE.popitem(last=False)
+                if user and trace_id:
+                    _TRACE_USER_CACHE[trace_id] = user
+                    _TRACE_USER_CACHE.move_to_end(trace_id)
+                    if len(_TRACE_USER_CACHE) > _CACHE_MAX:
+                        _TRACE_USER_CACHE.popitem(last=False)
 
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
-        resource_user = (
-            res.get("user.name")
-            or res.get("enduser.id")
-            or res.get("user.id")
-            or "unknown"
-        )
+        resource_user = _extract_user(res) or "unknown"
         default_agent = res.get("service.name") or "copilot-chat"
 
         spans = [s for ss in rs.get("scopeSpans", []) for s in ss.get("spans", [])]
@@ -118,6 +144,8 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 if not parent_id:
                     break
                 span_id = parent_id
+            if trace_id and trace_id in _TRACE_USER_CACHE:
+                return _TRACE_USER_CACHE[trace_id]
             return str(resource_user)
 
         # 2) build events from spans that carry token usage

@@ -518,31 +518,31 @@ export default function Home() {
             </label>
           </section>
 
-          <section className="metric-grid" aria-label="Usage totals">
-            <article className="metric-card metric-highlight">
-              <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatCount(totals.requests)}</div>
-              <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the current results</div>
-            </article>
-            <article className="metric-card">
-              <div className="metric-label">TOTAL TOKENS <Boxes size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatCompact(totals.input + totals.output)}</div>
-              <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
-            </article>
-            <article className="metric-card">
-              <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatCount(activeUsers)}</div>
-              <div className="metric-foot">Known users in the current results</div>
-            </article>
-            <article className="metric-card">
-              <div className="metric-label">MODELS USED <Cpu size={14} /></div>
-              <div className="metric-value">{loading ? "—" : formatCount(modelsUsed)}</div>
-              <div className="metric-foot">Distinct models in the current results</div>
-            </article>
-          </section>
-
           {view === "overview" && (
             <>
+              <section className="metric-grid" aria-label="Usage totals">
+                <article className="metric-card metric-highlight">
+                  <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCount(totals.requests)}</div>
+                  <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the current results</div>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-label">TOTAL TOKENS <Boxes size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCompact(totals.input + totals.output)}</div>
+                  <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCount(activeUsers)}</div>
+                  <div className="metric-foot">Known users in the current results</div>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-label">MODELS USED <Cpu size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCount(modelsUsed)}</div>
+                  <div className="metric-foot">Distinct models in the current results</div>
+                </article>
+              </section>
+
               <section className="overview-grid">
                 <article className="panel trend-panel">
                   <div className="panel-heading">
@@ -616,9 +616,7 @@ export default function Home() {
           {view === "models" && (
             <section className="panel full-panel">
               <div className="panel-heading"><div><div className="section-kicker">MODEL PERFORMANCE</div><h2>Usage by model</h2></div><span className="inventory-count">{modelRows.length} MODELS</span></div>
-              <div className="table-scroll"><table className="data-table"><thead><tr><th>MODEL</th><th>CALLS</th><th>TOKENS</th><th>EST. COST</th><th>SHARE</th></tr></thead><tbody>
-                {modelRows.map((model) => <tr key={model.model}><td><span className="model-cell-dot" />{model.model}</td><td>{formatCount(model.calls)}</td><td>{formatCount(model.tokens)}</td><td>{formatMoney(model.cost, currency)}</td><td><div className="share-bar"><span style={{ width: `${totals.input + totals.output ? (model.tokens / (totals.input + totals.output)) * 100 : 0}%` }} /></div></td></tr>)}
-              </tbody></table>{!modelRows.length && <EmptyState loading={loading} label="No model usage in this date range." />}</div>
+              <ModelTable rows={modelRows} totals={totals} currency={currency} loading={loading} />
             </section>
           )}
 
@@ -671,7 +669,120 @@ function EmptyState({ loading, label }: { loading: boolean; label: string }) {
   return <div className="empty-state">{loading ? <LoaderCircle className="spin" size={18} /> : <span className="empty-dash">—</span>}<span>{loading ? "Loading usage" : label}</span></div>;
 }
 
-function AgentTable({ agents, usage, currency, compact = false }: { agents: CatalogAgent[]; usage: UsageRow[]; currency: string; compact?: boolean }) {
+function ModelTable({
+  rows,
+  totals,
+  currency,
+  loading,
+}: {
+  rows: { model: string; calls: number; tokens: number; cost: number }[];
+  totals: { input: number; output: number };
+  currency: string;
+  loading: boolean;
+}) {
+  type ModelSortKey = "model" | "calls" | "tokens" | "cost" | "share";
+  const [sort, setSort] = useState<{ key: ModelSortKey; direction: "asc" | "desc" }>({
+    key: "tokens",
+    direction: "desc",
+  });
+
+  const totalTokens = totals.input + totals.output;
+  const modelItems = rows.map((m) => ({
+    ...m,
+    share: totalTokens ? (m.tokens / totalTokens) * 100 : 0,
+  }));
+
+  const sortedModels = [...modelItems].sort((a, b) => {
+    const left = a[sort.key];
+    const right = b[sort.key];
+    const result =
+      typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right));
+    return sort.direction === "asc" ? result : -result;
+  });
+
+  const sortHeader = (key: ModelSortKey, label: string) => (
+    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className="activity-sort-button"
+        onClick={() =>
+          setSort((current) => ({
+            key,
+            direction:
+              current.key === key
+                ? current.direction === "asc"
+                  ? "desc"
+                  : "asc"
+                : key === "model"
+                ? "asc"
+                : "desc",
+          }))
+        }
+        type="button"
+      >
+        {label}
+        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="table-scroll">
+      <table className="data-table">
+        <thead>
+          <tr>
+            {sortHeader("model", "MODEL")}
+            {sortHeader("calls", "CALLS")}
+            {sortHeader("tokens", "TOKENS")}
+            {sortHeader("cost", "EST. COST")}
+            {sortHeader("share", "SHARE")}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedModels.map((model) => (
+            <tr key={model.model}>
+              <td>
+                <span className="model-cell-dot" />
+                {model.model}
+              </td>
+              <td>{formatCount(model.calls)}</td>
+              <td>{formatCount(model.tokens)}</td>
+              <td>{formatMoney(model.cost, currency)}</td>
+              <td>
+                <div className="share-cell">
+                  <div className="share-bar">
+                    <span style={{ width: `${Math.min(100, model.share)}%` }} />
+                  </div>
+                  <span>{model.share.toFixed(1)}%</span>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length && <EmptyState loading={loading} label="No model usage in this date range." />}
+    </div>
+  );
+}
+
+function AgentTable({
+  agents,
+  usage,
+  currency,
+  compact = false,
+}: {
+  agents: CatalogAgent[];
+  usage: UsageRow[];
+  currency: string;
+  compact?: boolean;
+}) {
+  type AgentSortKey = "name" | "plugin" | "requests" | "tokens" | "cost" | "status";
+  const [sort, setSort] = useState<{ key: AgentSortKey; direction: "asc" | "desc" }>({
+    key: "requests",
+    direction: "desc",
+  });
+
   const metrics = new Map<string, { requests: number; tokens: number; cost: number; unpriced: number }>();
   const observedNames = new Map<string, string>();
   for (const row of usage) {
@@ -684,36 +795,274 @@ function AgentTable({ agents, usage, currency, compact = false }: { agents: Cata
     metrics.set(agentKey, current);
     observedNames.set(agentKey, row.agent);
   }
-  const visibleAgents = compact ? agents.slice(0, 6) : agents;
+
   const catalogNames = new Set(
-    agents.flatMap((agent) => [agent.name, agent.id].map((name) => name.trim().toLocaleLowerCase())),
+    agents.flatMap((agent) => [agent.name, agent.id].map((name) => name.trim().toLocaleLowerCase()))
   );
   const unlistedAgents = [...metrics.entries()]
     .filter(([key]) => !catalogNames.has(key))
     .sort((a, b) => b[1].requests - a[1].requests);
-  const visibleUnlisted = compact ? unlistedAgents.slice(0, 4) : unlistedAgents;
-  return (
-    <div className="table-scroll"><table className="data-table agent-table"><thead><tr><th>AGENT / PACKAGE</th><th>PLUGIN</th><th>CALLS</th><th>TOKENS</th><th>EST. COST</th><th>STATUS</th></tr></thead><tbody>
-      {visibleAgents.map((agent, index) => {
-        const isSkillPackage = agent.kind === "skill_package";
-        const key = isSkillPackage ? undefined : [agent.name, agent.id]
+
+  if (compact) {
+    const visibleAgents = agents.slice(0, 6);
+    const visibleUnlisted = unlistedAgents.slice(0, 4);
+    return (
+      <div className="table-scroll">
+        <table className="data-table agent-table">
+          <thead>
+            <tr>
+              <th>AGENT / PACKAGE</th>
+              <th>PLUGIN</th>
+              <th>CALLS</th>
+              <th>TOKENS</th>
+              <th>EST. COST</th>
+              <th>STATUS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleAgents.map((agent, index) => {
+              const isSkillPackage = agent.kind === "skill_package";
+              const key = isSkillPackage
+                ? undefined
+                : [agent.name, agent.id]
+                    .map((candidate) => candidate.trim().toLocaleLowerCase())
+                    .find((candidate) => metrics.has(candidate));
+              const measure = key ? metrics.get(key) : undefined;
+              return (
+                <tr key={`${agent.plugin_id}-${agent.id}-${index}`}>
+                  <td>
+                    <span className={`agent-avatar agent-avatar-${index % 4}`}>
+                      {isSkillPackage ? <Boxes size={16} /> : <Bot size={16} />}
+                    </span>
+                    <span className="agent-name-cell">
+                      <strong>{agent.name}</strong>
+                      <small>
+                        {isSkillPackage
+                          ? `Skill package · ${agent.skills?.length ?? 0} skills`
+                          : agent.description}
+                      </small>
+                      {isSkillPackage && !!agent.skills?.length && (
+                        <small title={agent.skills.join(", ")}>{agent.skills.join(", ")}</small>
+                      )}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="plugin-name">{agent.plugin_name || agent.plugin_id || "—"}</span>
+                    <small className="plugin-version">{agent.version ? `v${agent.version}` : ""}</small>
+                  </td>
+                  <td>{isSkillPackage ? "—" : formatCount(measure?.requests || 0)}</td>
+                  <td>{isSkillPackage ? "—" : formatCompact(measure?.tokens || 0)}</td>
+                  <td>{isSkillPackage ? "—" : formatMoney(measure?.cost || 0, currency)}</td>
+                  <td>
+                    <span
+                      className={`usage-badge ${
+                        isSkillPackage ? "unused" : measure ? "used" : "unused"
+                      }`}
+                    >
+                      <span />
+                      {isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {visibleUnlisted.map(([key, measure]) => (
+              <tr key={`tracked-${key}`}>
+                <td>
+                  <span className="agent-avatar agent-avatar-3">
+                    <Activity size={16} />
+                  </span>
+                  <span className="agent-name-cell">
+                    <strong>{observedNames.get(key) || key}</strong>
+                    <small>Observed in usage telemetry</small>
+                  </span>
+                </td>
+                <td>
+                  <span className="plugin-name">Not in marketplace</span>
+                </td>
+                <td>{formatCount(measure.requests)}</td>
+                <td>{formatCompact(measure.tokens)}</td>
+                <td>{formatMoney(measure.cost, currency)}</td>
+                <td>
+                  <span className="usage-badge used">
+                    <span />Tracked
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!visibleAgents.length && <EmptyState loading={false} label="No marketplace agents found." />}
+      </div>
+    );
+  }
+
+  type TableRow = {
+    key: string;
+    name: string;
+    description: string;
+    plugin: string;
+    version: string;
+    isSkillPackage: boolean;
+    skills?: string[];
+    requests: number;
+    tokens: number;
+    cost: number;
+    status: string;
+    statusScore: number;
+    avatarIndex: number;
+    isUnlisted: boolean;
+  };
+
+  const catalogRows: TableRow[] = agents.map((agent, index) => {
+    const isSkillPackage = agent.kind === "skill_package";
+    const metricKey = isSkillPackage
+      ? undefined
+      : [agent.name, agent.id]
           .map((candidate) => candidate.trim().toLocaleLowerCase())
           .find((candidate) => metrics.has(candidate));
-        const measure = key ? metrics.get(key) : undefined;
-        return <tr key={`${agent.plugin_id}-${agent.id}-${index}`}>
-          <td><span className={`agent-avatar agent-avatar-${index % 4}`}>{isSkillPackage ? <Boxes size={16} /> : <Bot size={16} />}</span><span className="agent-name-cell"><strong>{agent.name}</strong><small>{isSkillPackage ? `Skill package · ${agent.skills?.length ?? 0} skills` : agent.description}</small>{isSkillPackage && !!agent.skills?.length && <small title={agent.skills.join(", ")}>{agent.skills.join(", ")}</small>}</span></td>
-          <td><span className="plugin-name">{agent.plugin_name || agent.plugin_id || "—"}</span><small className="plugin-version">{agent.version ? `v${agent.version}` : ""}</small></td>
-          <td>{isSkillPackage ? "—" : formatCount(measure?.requests || 0)}</td><td>{isSkillPackage ? "—" : formatCompact(measure?.tokens || 0)}</td><td>{isSkillPackage ? "—" : formatMoney(measure?.cost || 0, currency)}</td>
-          <td><span className={`usage-badge ${isSkillPackage ? "unused" : measure ? "used" : "unused"}`}><span />{isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage"}</span></td>
-        </tr>;
-      })}
-      {visibleUnlisted.map(([key, measure]) => <tr key={`tracked-${key}`}>
-        <td><span className="agent-avatar agent-avatar-3"><Activity size={16} /></span><span className="agent-name-cell"><strong>{observedNames.get(key) || key}</strong><small>Observed in usage telemetry</small></span></td>
-        <td><span className="plugin-name">Not in marketplace</span></td>
-        <td>{formatCount(measure.requests)}</td><td>{formatCompact(measure.tokens)}</td><td>{formatMoney(measure.cost, currency)}</td>
-        <td><span className="usage-badge used"><span />Tracked</span></td>
-      </tr>)}
-    </tbody></table>{!visibleAgents.length && <EmptyState loading={false} label="No marketplace agents found." />}</div>
+    const measure = metricKey ? metrics.get(metricKey) : undefined;
+    const status = isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage";
+    const statusScore = isSkillPackage ? 1 : measure ? 2 : 0;
+    return {
+      key: `${agent.plugin_id}-${agent.id}-${index}`,
+      name: agent.name,
+      description: isSkillPackage
+        ? `Skill package · ${agent.skills?.length ?? 0} skills`
+        : agent.description,
+      plugin: agent.plugin_name || agent.plugin_id || "—",
+      version: agent.version ? `v${agent.version}` : "",
+      isSkillPackage,
+      skills: agent.skills,
+      requests: isSkillPackage ? 0 : measure?.requests || 0,
+      tokens: isSkillPackage ? 0 : measure?.tokens || 0,
+      cost: isSkillPackage ? 0 : measure?.cost || 0,
+      status,
+      statusScore,
+      avatarIndex: index % 4,
+      isUnlisted: false,
+    };
+  });
+
+  const unlistedRows: TableRow[] = unlistedAgents.map(([key, measure]) => ({
+    key: `tracked-${key}`,
+    name: observedNames.get(key) || key,
+    description: "Observed in usage telemetry",
+    plugin: "Not in marketplace",
+    version: "",
+    isSkillPackage: false,
+    skills: undefined,
+    requests: measure.requests,
+    tokens: measure.tokens,
+    cost: measure.cost,
+    status: "Tracked",
+    statusScore: 2,
+    avatarIndex: 3,
+    isUnlisted: true,
+  }));
+
+  const allRows = [...catalogRows, ...unlistedRows];
+
+  const sortedRows = [...allRows].sort((a, b) => {
+    if (sort.key === "status") {
+      const result = a.statusScore - b.statusScore;
+      return sort.direction === "asc" ? result : -result;
+    }
+    const left = a[sort.key];
+    const right = b[sort.key];
+    const result =
+      typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right));
+    return sort.direction === "asc" ? result : -result;
+  });
+
+  const sortHeader = (key: AgentSortKey, label: string) => (
+    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className="activity-sort-button"
+        onClick={() =>
+          setSort((current) => ({
+            key,
+            direction:
+              current.key === key
+                ? current.direction === "asc"
+                  ? "desc"
+                  : "asc"
+                : ["name", "plugin"].includes(key)
+                ? "asc"
+                : "desc",
+          }))
+        }
+        type="button"
+      >
+        {label}
+        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="table-scroll">
+      <table className="data-table agent-table">
+        <thead>
+          <tr>
+            {sortHeader("name", "AGENT / PACKAGE")}
+            {sortHeader("plugin", "PLUGIN")}
+            {sortHeader("requests", "CALLS")}
+            {sortHeader("tokens", "TOKENS")}
+            {sortHeader("cost", "EST. COST")}
+            {sortHeader("status", "STATUS")}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.map((row) => (
+            <tr key={row.key}>
+              <td>
+                <span className={`agent-avatar agent-avatar-${row.avatarIndex}`}>
+                  {row.isUnlisted ? (
+                    <Activity size={16} />
+                  ) : row.isSkillPackage ? (
+                    <Boxes size={16} />
+                  ) : (
+                    <Bot size={16} />
+                  )}
+                </span>
+                <span className="agent-name-cell">
+                  <strong>{row.name}</strong>
+                  <small>{row.description}</small>
+                  {row.isSkillPackage && !!row.skills?.length && (
+                    <small title={row.skills.join(", ")}>{row.skills.join(", ")}</small>
+                  )}
+                </span>
+              </td>
+              <td>
+                <span className="plugin-name">{row.plugin}</span>
+                {row.version && <small className="plugin-version">{row.version}</small>}
+              </td>
+              <td>{row.isSkillPackage ? "—" : formatCount(row.requests)}</td>
+              <td>{row.isSkillPackage ? "—" : formatCompact(row.tokens)}</td>
+              <td>{row.isSkillPackage ? "—" : formatMoney(row.cost, currency)}</td>
+              <td>
+                <span
+                  className={`usage-badge ${
+                    row.isSkillPackage
+                      ? "unused"
+                      : row.statusScore === 2
+                      ? "used"
+                      : "unused"
+                  }`}
+                >
+                  <span />
+                  {row.status}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!allRows.length && <EmptyState loading={false} label="No marketplace agents found." />}
+    </div>
   );
 }
 
@@ -728,9 +1077,24 @@ function RecentActivity({ rows, onViewAll }: { rows: UsageRow[]; onViewAll: () =
 }
 
 function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
-  const metrics = new Map<string, { requests: number; input: number; output: number; cost: number; unpriced: number }>();
+  type UserSortKey = "user" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
+  const [sort, setSort] = useState<{ key: UserSortKey; direction: "asc" | "desc" }>({
+    key: "cost",
+    direction: "desc",
+  });
+
+  const metrics = new Map<
+    string,
+    { requests: number; input: number; output: number; cost: number; unpriced: number }
+  >();
   for (const row of rows) {
-    const current = metrics.get(row.user) || { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0 };
+    const current = metrics.get(row.user) || {
+      requests: 0,
+      input: 0,
+      output: 0,
+      cost: 0,
+      unpriced: 0,
+    };
     current.requests += row.requests;
     current.input += row.input_tokens;
     current.output += row.output_tokens;
@@ -738,17 +1102,107 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
     current.unpriced += row.unpriced_requests;
     metrics.set(row.user, current);
   }
-  const userRows = [...metrics.entries()].sort((a, b) => b[1].cost - a[1].cost || b[1].requests - a[1].requests);
-  const totalTokens = userRows.reduce((total, [, measure]) => total + measure.input + measure.output, 0);
+
+  const rawUserRows = [...metrics.entries()];
+  const totalTokens = rawUserRows.reduce(
+    (total, [, measure]) => total + measure.input + measure.output,
+    0
+  );
+
+  const userItems = rawUserRows.map(([user, measure]) => {
+    const tokens = measure.input + measure.output;
+    const share = totalTokens ? (tokens / totalTokens) * 100 : 0;
+    return {
+      user,
+      requests: measure.requests,
+      input: measure.input,
+      output: measure.output,
+      tokens,
+      cost: measure.cost,
+      unpriced: measure.unpriced,
+      share,
+    };
+  });
+
+  const sortedUsers = [...userItems].sort((a, b) => {
+    const left = a[sort.key];
+    const right = b[sort.key];
+    const result =
+      typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right));
+    return sort.direction === "asc" ? result : -result;
+  });
+
+  const sortHeader = (key: UserSortKey, label: string) => (
+    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className="activity-sort-button"
+        onClick={() =>
+          setSort((current) => ({
+            key,
+            direction:
+              current.key === key
+                ? current.direction === "asc"
+                  ? "desc"
+                  : "asc"
+                : key === "user"
+                ? "asc"
+                : "desc",
+          }))
+        }
+        type="button"
+      >
+        {label}
+        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
 
   return (
-    <div className="table-scroll"><table className="data-table user-table"><thead><tr><th>USER</th><th>CALLS</th><th>INPUT TOKENS</th><th>OUTPUT TOKENS</th><th>TOTAL TOKENS</th><th>EST. COST</th><th>SHARE</th></tr></thead><tbody>
-      {userRows.map(([user, measure]) => {
-        const tokens = measure.input + measure.output;
-        const share = totalTokens ? (tokens / totalTokens) * 100 : 0;
-        return <tr key={user}><td>{user}</td><td>{formatCount(measure.requests)}</td><td>{formatCount(measure.input)}</td><td>{formatCount(measure.output)}</td><td>{formatCount(tokens)}</td><td>{formatMoney(measure.cost, currency)}{measure.unpriced > 0 && <small className="user-unpriced">{formatCount(measure.unpriced)} unpriced</small>}</td><td><div className="share-cell"><div className="share-bar"><span style={{ width: `${share}%` }} /></div><span>{share.toFixed(1)}%</span></div></td></tr>;
-      })}
-    </tbody></table>{!userRows.length && <EmptyState loading={false} label="No user usage in this date range." />}</div>
+    <div className="table-scroll">
+      <table className="data-table user-table">
+        <thead>
+          <tr>
+            {sortHeader("user", "USER")}
+            {sortHeader("requests", "CALLS")}
+            {sortHeader("input", "INPUT TOKENS")}
+            {sortHeader("output", "OUTPUT TOKENS")}
+            {sortHeader("tokens", "TOTAL TOKENS")}
+            {sortHeader("cost", "EST. COST")}
+            {sortHeader("share", "SHARE")}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedUsers.map((item) => (
+            <tr key={item.user}>
+              <td>{item.user}</td>
+              <td>{formatCount(item.requests)}</td>
+              <td>{formatCount(item.input)}</td>
+              <td>{formatCount(item.output)}</td>
+              <td>{formatCount(item.tokens)}</td>
+              <td>
+                {formatMoney(item.cost, currency)}
+                {item.unpriced > 0 && (
+                  <small className="user-unpriced">
+                    {formatCount(item.unpriced)} unpriced
+                  </small>
+                )}
+              </td>
+              <td>
+                <div className="share-cell">
+                  <div className="share-bar">
+                    <span style={{ width: `${Math.min(100, item.share)}%` }} />
+                  </div>
+                  <span>{item.share.toFixed(1)}%</span>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!userItems.length && <EmptyState loading={false} label="No user usage in this date range." />}
+    </div>
   );
 }
 

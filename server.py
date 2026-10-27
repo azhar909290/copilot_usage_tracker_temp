@@ -147,6 +147,14 @@ async def traces(request: Request):
                     "custom_dimensions": dim,
                 },
             )
+            if ev["user"] == "unknown":
+                log.warning(
+                    "unresolved_user_span key=%s model=%s tokens=%d agent=%s (lacks identity on span/trace)",
+                    ev["key"],
+                    ev["model"],
+                    ev["total_tokens"],
+                    ev["agent"],
+                )
     # OTLP success response (empty ExportTraceServiceResponse)
     if "json" in ctype:
         return Response(content="{}", media_type="application/json")
