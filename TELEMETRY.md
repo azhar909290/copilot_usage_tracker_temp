@@ -27,6 +27,72 @@ Reload the VS Code window after changing these settings. Environment variables
 can override settings. These settings require a Copilot Chat version supporting
 OpenTelemetry. See the [official monitoring documentation](https://code.visualstudio.com/docs/copilot/guides/monitoring-agents).
 
+### Organization-Wide Identity Capture (managed-settings.json)
+
+This is the recommended configuration for capturing every team member's identity
+automatically without each user having to configure anything manually.
+
+In your `.github-private/managed-settings.json` (applied via your GitHub organization
+policy), use this configuration:
+
+```json
+{
+  "telemetry": {
+    "enabled": true,
+    "endpoint": "https://<your-azure-receiver>.azurewebsites.net",
+    "protocol": "http/protobuf",
+    "capture": {
+      "identity": true
+    },
+    "captureContent": false,
+    "lockCaptureContent": true,
+    "serviceName": "copilot",
+    "resourceAttributes": {
+      "deployment.environment": "production"
+    }
+  }
+}
+```
+
+**What `"capture": { "identity": true }` does for every user in your org:**
+
+| What is captured | Attribute key in OTel span |
+| :--- | :--- |
+| GitHub account login (e.g. `alice`, `bob`) | `user.name` |
+| Local OS username | `process.user.name` *(not used for identity by this receiver)* |
+| Machine hostname | `host.name` |
+
+With `captureIdentity` enabled at the **managed (org) level**, every Copilot Chat
+user in your organization automatically emits their GitHub login on each trace.
+The receiver picks this up from `user.name` on the root span and attributes **all**
+LLM sub-calls in that trace to that user — including background spans like
+`thinkingTitle` and `XtabProvider` that would otherwise fall into `unknown`.
+
+> **Important:** Do **not** add `user.name` as a static value in `resourceAttributes`.
+> The managed setting `"capture": { "identity": true }` makes Copilot Chat inject
+> each user's **actual** GitHub login dynamically per-session. A static
+> `resourceAttributes` entry would overwrite every user's identity with the same
+> fixed value.
+
+**Summary of fields in your current managed-settings.json:**
+
+| Field | Keep as-is? | Reason |
+| :--- | :---: | :--- |
+| `"enabled": true` | ✅ Yes | Required to turn on OTel export |
+| `"endpoint"` | ✅ Yes | Your Azure receiver URL |
+| `"protocol": "http/protobuf"` | ✅ Yes | Standard OTLP protocol |
+| `"capture": { "identity": true }` | ✅ Yes | **This is the key setting** — auto-captures each user's GitHub login |
+| `"captureContent": false` | ✅ Yes | Keeps prompt/response content private |
+| `"lockCaptureContent": true` | ✅ Yes | Prevents individual users from enabling content capture |
+| `"serviceName": "copilot"` | ✅ Yes | Labels all spans with the service name |
+| `"resourceAttributes": { "deployment.environment": "production" }` | ✅ Yes | Adds an org-level tag to every span |
+
+Your `managed-settings.json` is already correct for org-wide use. No changes needed.
+The only reason tokens land in `unknown` is that background sub-spans (streaming
+completions, title generators) arrive at the receiver before the root session span
+that carries the identity. The trace-level identity cache added to `parser.py`
+resolves this — within a single request batch.
+
 For Copilot custom agents, the tracker prefers `copilot_chat.mode_name` on the
 nearest available agent invocation over internal labels such as `panel/editAgent`.
 Otherwise it uses `gen_ai.agent.name` on the LLM span or an available ancestor.
@@ -69,12 +135,15 @@ capture.
 
 ### Why several user names can appear
 
-`azhar909290` is a GitHub account name, while `azharudeens` matches the local
-Linux/WSL account name. These are different identity namespaces, not two GitHub
-accounts. The receiver does not use `process.user.name` as a GitHub identity.
-An OS-style name in the User column means that name was previously stored or
-supplied through `user.name`, `enduser.id`, or `user.id`; the ledger alone cannot
-prove which client configuration supplied it.
+The receiver groups usage by the identity it finds on each span or its ancestors.
+Identity comes from span attributes (`user.name`, `enduser.id`, `github.actor`, etc.)
+or resource attributes pushed by the OTel SDK on every client machine.
+If two different attribute keys are used by different parts of the client, they may
+resolve to the same person but appear as different labels in the ledger.
+An OS-style name in the User column means that name was supplied through
+`user.name`, `enduser.id`, or `user.id`; the ledger alone cannot prove which client
+configuration supplied it. The receiver does **not** use `process.user.name` as a
+GitHub identity.
 
 The receiver prefers identity on a call or its ancestor spans, then the resource
 identity. Ancestor identity can be inherited across resource groups in the same

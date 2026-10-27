@@ -16,7 +16,7 @@ class ParserTests(unittest.TestCase):
         parent = {
             "traceId": "identity-batches", "spanId": "root",
             "attributes": [attribute("gen_ai.operation.name", "invoke_agent"),
-                           attribute("user.name", "azhar909290")],
+                           attribute("user.name", "org-user-alice")],
         }
         intermediate = {
             "traceId": "identity-batches", "spanId": "tool", "parentSpanId": "root",
@@ -30,7 +30,7 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(parse_spans(payload([parent, intermediate]), PriceBook()), [])
         events = parse_spans(payload([child]), PriceBook())
-        self.assertEqual(events[0]["user"], "azhar909290")
+        self.assertEqual(events[0]["user"], "org-user-alice")
 
         child["traceId"] = "unrelated-identity-trace"
         self.assertEqual(parse_spans(payload([child]), PriceBook())[0]["user"], "unknown")
@@ -42,19 +42,19 @@ class ParserTests(unittest.TestCase):
         }
         parent = {
             "traceId": "identity-resources", "spanId": "root",
-            "attributes": [attribute("user.name", "azhar909290")],
+            "attributes": [attribute("user.name", "org-user-alice")],
         }
         payload = {"resourceSpans": [
             {"scopeSpans": [{"spans": [child]}]},
             {"scopeSpans": [{"spans": [parent]}]},
         ]}
-        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "azhar909290")
+        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "org-user-alice")
         child["attributes"].append(attribute("user.name", "another-user"))
         self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "another-user")
 
     def test_os_identity_is_not_used_as_github_identity(self):
         payload = {"resourceSpans": [{
-            "resource": {"attributes": [attribute("process.user.name", "azharudeens")]},
+            "resource": {"attributes": [attribute("process.user.name", "local-os-user")]},
             "scopeSpans": [{"spans": [{
                 "traceId": "os-only", "spanId": "chat",
                 "attributes": [attribute("gen_ai.usage.input_tokens", 100)],
@@ -197,6 +197,40 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["user"], "octocat")
+
+    def test_sibling_or_unlinked_spans_inherit_trace_level_identity(self):
+        trace_id = "trace-sibling-identity"
+        payload = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("service.name", "copilot-chat")]},
+                "scopeSpans": [{"spans": [
+                    {
+                        "traceId": trace_id,
+                        "spanId": "root",
+                        "attributes": [
+                            attribute("gen_ai.operation.name", "invoke_agent"),
+                            attribute("github.actor", "org-user-bob"),
+                        ],
+                    },
+                    {
+                        "traceId": trace_id,
+                        "spanId": "unlinked-completion",
+                        # Notice: no parentSpanId set!
+                        "attributes": [
+                            attribute("gen_ai.usage.input_tokens", 80),
+                            attribute("gen_ai.request.model", "gpt-4o"),
+                        ],
+                    },
+                ]}],
+            }],
+        }
+        price_book = Mock()
+        price_book.cost.return_value = ("gpt-4o", 0.01)
+
+        events = parse_spans(payload, price_book)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["user"], "org-user-bob")
+        self.assertEqual(events[0]["input_tokens"], 80)
 
 
 if __name__ == "__main__":
