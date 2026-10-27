@@ -753,8 +753,41 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
 }
 
 function ActivityTable({ rows, loading, currency }: { rows: UsageRow[]; loading: boolean; currency: string }) {
-  const sortedRows = [...rows].sort(compareLatest);
+  type SortKey = "date" | "first_seen" | "last_seen" | "user" | "agent" | "model" | "requests" | "input_tokens" | "output_tokens" | "cost";
+  const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({
+    key: "last_seen",
+    direction: "desc",
+  });
+  const sortedRows = [...rows].sort((a, b) => {
+    const left = a[sort.key];
+    const right = b[sort.key];
+    if (left == null || right == null) {
+      return left == null ? (right == null ? 0 : 1) : -1;
+    }
+    const result = typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right));
+    return sort.direction === "asc" ? result : -result;
+  });
+  const sortHeader = (key: SortKey, label: string) => (
+    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        className="activity-sort-button"
+        onClick={() => setSort((current) => ({
+          key,
+          direction: current.key === key
+            ? (current.direction === "asc" ? "desc" : "asc")
+            : ["date", "user", "agent", "model"].includes(key) ? "asc" : "desc",
+        }))}
+        type="button"
+      >
+        {label}{sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
   return <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">DAILY TOTALS</div><h2>Recorded requests</h2></div><span className="inventory-count">{formatCount(rows.length)} ROWS</span></div>
-    <div className="table-scroll"><table className="data-table"><thead><tr><th>DATE</th><th>FIRST CALL (LOCAL)</th><th>LAST CALL (LOCAL)</th><th>USER</th><th>AGENT</th><th>MODEL</th><th>CALLS</th><th>INPUT</th><th>OUTPUT</th><th>COST</th></tr></thead><tbody>{sortedRows.map((row, index) => <tr key={`${row.date}-${row.user}-${row.agent}-${row.model}-${index}`}><td>{displayDate(row.date, { month: "short", day: "numeric", year: "numeric" })}</td><td><time dateTime={row.first_seen || undefined}>{displayCallTime(row.first_seen)}</time></td><td><time dateTime={row.last_seen || undefined}>{displayCallTime(row.last_seen)}</time></td><td>{row.user}</td><td>{row.agent}</td><td>{row.model}</td><td>{formatCount(row.requests)}</td><td>{formatCount(row.input_tokens)}</td><td>{formatCount(row.output_tokens)}</td><td>{formatMoney(row.cost, currency)}</td></tr>)}</tbody></table>{!rows.length && <EmptyState loading={loading} label="No activity in this date range." />}</div>
+    <div className="table-scroll"><table className="data-table"><thead><tr>
+      {sortHeader("date", "DATE")}{sortHeader("first_seen", "FIRST CALL (LOCAL)")}{sortHeader("last_seen", "LAST CALL (LOCAL)")}{sortHeader("user", "USER")}{sortHeader("agent", "AGENT")}{sortHeader("model", "MODEL")}{sortHeader("requests", "CALLS")}{sortHeader("input_tokens", "INPUT")}{sortHeader("output_tokens", "OUTPUT")}{sortHeader("cost", "COST")}
+    </tr></thead><tbody>{sortedRows.map((row, index) => <tr key={`${row.date}-${row.user}-${row.agent}-${row.model}-${index}`}><td>{displayDate(row.date, { month: "short", day: "numeric", year: "numeric" })}</td><td><time dateTime={row.first_seen || undefined}>{displayCallTime(row.first_seen)}</time></td><td><time dateTime={row.last_seen || undefined}>{displayCallTime(row.last_seen)}</time></td><td>{row.user}</td><td>{row.agent}</td><td>{row.model}</td><td>{formatCount(row.requests)}</td><td>{formatCount(row.input_tokens)}</td><td>{formatCount(row.output_tokens)}</td><td>{formatMoney(row.cost, currency)}</td></tr>)}</tbody></table>{!rows.length && <EmptyState loading={loading} label="No activity in this date range." />}</div>
   </section>;
 }

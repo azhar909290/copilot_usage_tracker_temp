@@ -1,25 +1,5 @@
 # Per-Agent LLM Usage
 
-## Azure Monitor for the API
-
-Install the server dependencies with `venv/bin/python -m pip install -r requirements.txt`.
-Set `APPLICATIONINSIGHTS_CONNECTION_STRING` in the server environment or local
-`.env` file to the **complete** connection string from your Application Insights
-resource. Do not include the `...` placeholder or commit the connection string.
-For Azure App Service, set it in the application's environment variables.
-Optionally set `OTEL_SERVICE_NAME=copilot-usage-api` to identify this service.
-
-Restart the server after changing configuration. Azure Monitor is configured
-after loading `.env` and before creating the FastAPI app. The app is explicitly
-instrumented for requests. It exports server request telemetry and logs from
-the `usage_api` logger. Without a connection string, monitoring is disabled and
-the receiver continues to run locally. Configuration errors propagate rather
-than silently disabling monitoring.
-
-This monitors the receiver itself; it does not forward incoming Copilot OTLP
-spans to Application Insights. The receiver's existing usage storage and
-ingestion endpoints remain unchanged.
-
 Each LLM call processes input tokens and usually generates output tokens. Use
 the provider's reported usage, not a count of characters or a guessed token count.
 An agent invocation can make multiple LLM calls, including calls from subagents.
