@@ -104,6 +104,22 @@ class UsageStoreTests(unittest.TestCase):
             self.assertEqual(store.delete_user("alice"), 0)
             self.assertEqual({row["user"] for row in store.summary()}, {"bob"})
 
+    def test_get_events_returns_all_individual_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(directory)
+            e1 = event("call-1", "alice", 100)
+            e2 = event("call-2", "bob", 200)
+            store.add_events([e1, e2])
+
+            events = store.get_events()
+            self.assertEqual(len(events), 2)
+            self.assertEqual(events[0]["key"], "call-1")
+            self.assertEqual(events[1]["key"], "call-2")
+
+            # Check survival across store reload
+            reloaded = UsageStore(directory)
+            self.assertEqual(len(reloaded.get_events()), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

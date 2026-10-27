@@ -51,6 +51,20 @@ type UsageRow = {
   unpriced_requests: number;
 };
 
+type CallEvent = {
+  key: string;
+  timestamp: string;
+  date: string;
+  user: string;
+  agent: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens?: number;
+  latency_ms?: number | null;
+  cost: number;
+};
+
 type CatalogAgent = {
   id: string;
   name: string;
@@ -150,6 +164,7 @@ export default function Home() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
+  const [callEvents, setCallEvents] = useState<CallEvent[]>([]);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [currency, setCurrency] = useState("USD");
   const [loading, setLoading] = useState(true);
@@ -210,9 +225,29 @@ export default function Home() {
           agentResponse.json(),
         ]);
         if (!active) return;
-        setUsageRows(Array.isArray(usagePayload.rows) ? usagePayload.rows : []);
+        const rows = Array.isArray(usagePayload.rows) ? usagePayload.rows : [];
+        setUsageRows(rows);
         setCurrency(usagePayload.currency || "USD");
         setCatalog(agentPayload);
+        if (Array.isArray(usagePayload.events) && usagePayload.events.length > 0) {
+          setCallEvents(usagePayload.events);
+        } else {
+          setCallEvents(
+            rows.map((r: UsageRow, i: number) => ({
+              key: `${r.date}-${r.user}-${r.agent}-${r.model}-${i}`,
+              timestamp: r.last_seen || r.first_seen || `${r.date}T00:00:00Z`,
+              date: r.date,
+              user: r.user,
+              agent: r.agent,
+              model: r.model,
+              input_tokens: r.input_tokens,
+              output_tokens: r.output_tokens,
+              total_tokens: (r.input_tokens || 0) + (r.output_tokens || 0),
+              latency_ms: (r as any).latency_ms_avg ?? null,
+              cost: r.cost,
+            }))
+          );
+        }
         setUpdatedAt(new Date());
         setError(null);
       } catch (loadError) {
@@ -257,6 +292,20 @@ export default function Home() {
     const matchesSearch =
       !query ||
       [row.date, row.user, row.agent, row.model].some((value) =>
+        value.toLowerCase().includes(query),
+      );
+    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
+  });
+
+  const filteredEvents = callEvents.filter((event) => {
+    const matchesPeriod = !cutoffDate || event.date >= cutoffDate;
+    const matchesUser = selectedUser === "all" || event.user === selectedUser;
+    const matchesAgent = selectedAgent === "all" || event.agent === selectedAgent;
+    const matchesModel = selectedModel === "all" || event.model === selectedModel;
+    const query = search.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [event.date, event.user, event.agent, event.model, event.timestamp].some((value) =>
         value.toLowerCase().includes(query),
       );
     return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
@@ -310,9 +359,9 @@ export default function Home() {
   for (const row of filteredRows) {
     agentMap.set(row.agent, (agentMap.get(row.agent) || 0) + row.requests);
   }
-  const agentNames = [...new Set(usageRows.map((row) => row.agent))].sort();
-  const modelNames = [...new Set(usageRows.map((row) => row.model))].sort();
-  const userNames = [...new Set(usageRows.map((row) => row.user))].sort();
+  const agentNames = [...new Set([...usageRows.map((row) => row.agent), ...callEvents.map((e) => e.agent)])].sort();
+  const modelNames = [...new Set([...usageRows.map((row) => row.model), ...callEvents.map((e) => e.model)])].sort();
+  const userNames = [...new Set([...usageRows.map((row) => row.user), ...callEvents.map((e) => e.user)])].sort();
   const activeLabel = navigation.find((item) => item.id === view)?.label || "Overview";
   const commands = [
     ...navigation.map((item) => ({
@@ -338,6 +387,38 @@ export default function Home() {
   }
 
   function exportCsv() {
+    if (view === "activity") {
+      const columns: (keyof CallEvent)[] = [
+        "timestamp",
+        "date",
+        "user",
+        "agent",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "latency_ms",
+        "cost",
+      ];
+      const csv = [
+        columns.map(getCsvValue).join(","),
+        ...filteredEvents.map((event) =>
+          columns
+            .map((column) =>
+              column === "total_tokens"
+                ? getCsvValue((event.input_tokens || 0) + (event.output_tokens || 0))
+                : getCsvValue(event[column])
+            )
+            .join(",")
+        ),
+      ].join("\n");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      link.download = "copilot-call-activity.csv";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      return;
+    }
     const columns: (keyof UsageRow)[] = [
       "date",
       "first_seen",
@@ -594,7 +675,7 @@ export default function Home() {
                 </div>
                 <AgentTable agents={catalog?.agents || []} usage={filteredRows} currency={currency} compact />
               </section>
-              <RecentActivity rows={filteredRows} onViewAll={() => setView("activity")} />
+              <RecentActivity events={filteredEvents} rows={filteredRows} onViewAll={() => setView("activity")} />
             </>
           )}
 
@@ -620,7 +701,7 @@ export default function Home() {
             </section>
           )}
 
-          {view === "activity" && <ActivityTable rows={filteredRows} loading={loading} currency={currency} />}
+          {view === "activity" && <ActivityTable events={filteredEvents} loading={loading} currency={currency} />}
 
           <footer className="page-footer"><span><span className="footer-status" /> RECEIVER {error ? "UNAVAILABLE" : "OPERATIONAL"}</span><span>{updatedAt ? `LAST SYNC ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "WAITING FOR DATA"}</span></footer>
         </div>
@@ -1066,12 +1147,58 @@ function AgentTable({
   );
 }
 
-function RecentActivity({ rows, onViewAll }: { rows: UsageRow[]; onViewAll: () => void }) {
-  const recent = [...rows].sort(compareLatest).slice(0, 5);
+function RecentActivity({
+  events,
+  rows,
+  onViewAll,
+}: {
+  events: CallEvent[];
+  rows: UsageRow[];
+  onViewAll: () => void;
+}) {
+  const recent =
+    events.length > 0
+      ? [...events]
+          .sort((a, b) => Date.parse(b.timestamp || b.date) - Date.parse(a.timestamp || a.date))
+          .slice(0, 5)
+      : [...rows].sort(compareLatest).slice(0, 5).map((r, index) => ({
+          key: `${r.date}-${r.agent}-${r.model}-${index}`,
+          timestamp: r.last_seen || `${r.date}T00:00:00Z`,
+          user: r.user,
+          agent: r.agent,
+          model: r.model,
+          input_tokens: r.input_tokens,
+          output_tokens: r.output_tokens,
+          cost: r.cost,
+        }));
+
   return (
     <section className="recent-section">
-      <div className="panel-heading"><div><div className="section-kicker">LATEST RECORDED</div><h2>Recent activity</h2></div><button className="text-link" onClick={onViewAll} type="button">Full activity <ArrowUpRight size={13} /></button></div>
-      {recent.length ? <div className="recent-list">{recent.map((row, index) => <div className="recent-row" key={`${row.date}-${row.agent}-${row.model}-${index}`}><span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span><div className="recent-copy"><strong>{row.agent}</strong><small>{row.model} · {row.user}</small></div><span className="recent-tokens">{formatCompact(row.input_tokens + row.output_tokens)} <small>tokens</small></span><span className="recent-cost">${row.cost.toFixed(4)}</span><time dateTime={row.last_seen || undefined} title="Last call (local time)">{row.last_seen ? displayCallTime(row.last_seen) : `${displayDate(row.date, { month: "short", day: "numeric" })} — Time unavailable`}</time></div>)}</div> : <EmptyState loading={false} label="No activity found for these filters." />}
+      <div className="panel-heading">
+        <div><div className="section-kicker">LATEST RECORDED</div><h2>Recent calls</h2></div>
+        <button className="text-link" onClick={onViewAll} type="button">Full activity <ArrowUpRight size={13} /></button>
+      </div>
+      {recent.length ? (
+        <div className="recent-list">
+          {recent.map((call, index) => {
+            const tokens = (call.input_tokens || 0) + (call.output_tokens || 0);
+            return (
+              <div className="recent-row" key={`${call.key}-${index}`}>
+                <span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span>
+                <div className="recent-copy">
+                  <strong>{call.agent}</strong>
+                  <small>{call.model} · {call.user}</small>
+                </div>
+                <span className="recent-tokens">{formatCompact(tokens)} <small>tokens</small></span>
+                <span className="recent-cost">${(call.cost || 0).toFixed(4)}</span>
+                <time dateTime={call.timestamp} title="Call time (local time)">
+                  {call.timestamp ? displayCallTime(call.timestamp) : "Time unavailable"}
+                </time>
+              </div>
+            );
+          })}
+        </div>
+      ) : <EmptyState loading={false} label="No activity found for these filters." />}
     </section>
   );
 }
@@ -1206,42 +1333,134 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
   );
 }
 
-function ActivityTable({ rows, loading, currency }: { rows: UsageRow[]; loading: boolean; currency: string }) {
-  type SortKey = "date" | "first_seen" | "last_seen" | "user" | "agent" | "model" | "requests" | "input_tokens" | "output_tokens" | "cost";
+function ActivityTable({
+  events,
+  loading,
+  currency,
+}: {
+  events: CallEvent[];
+  loading: boolean;
+  currency: string;
+}) {
+  type SortKey =
+    | "timestamp"
+    | "user"
+    | "agent"
+    | "model"
+    | "input_tokens"
+    | "output_tokens"
+    | "total_tokens"
+    | "latency_ms"
+    | "cost";
+
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({
-    key: "last_seen",
+    key: "timestamp",
     direction: "desc",
   });
-  const sortedRows = [...rows].sort((a, b) => {
-    const left = a[sort.key];
-    const right = b[sort.key];
+
+  const sortedEvents = [...events].sort((a, b) => {
+    let left: any = a[sort.key];
+    let right: any = b[sort.key];
+
+    if (sort.key === "total_tokens") {
+      left = (a.input_tokens || 0) + (a.output_tokens || 0);
+      right = (b.input_tokens || 0) + (b.output_tokens || 0);
+    } else if (sort.key === "timestamp") {
+      left = Date.parse(a.timestamp || a.date || "1970-01-01");
+      right = Date.parse(b.timestamp || b.date || "1970-01-01");
+    }
+
     if (left == null || right == null) {
       return left == null ? (right == null ? 0 : 1) : -1;
     }
-    const result = typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
+    const result =
+      typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right));
     return sort.direction === "asc" ? result : -result;
   });
+
   const sortHeader = (key: SortKey, label: string) => (
     <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
       <button
         className="activity-sort-button"
-        onClick={() => setSort((current) => ({
-          key,
-          direction: current.key === key
-            ? (current.direction === "asc" ? "desc" : "asc")
-            : ["date", "user", "agent", "model"].includes(key) ? "asc" : "desc",
-        }))}
+        onClick={() =>
+          setSort((current) => ({
+            key,
+            direction:
+              current.key === key
+                ? current.direction === "asc"
+                  ? "desc"
+                  : "asc"
+                : ["user", "agent", "model"].includes(key)
+                ? "asc"
+                : "desc",
+          }))
+        }
         type="button"
       >
-        {label}{sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
+        {label}
+        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
       </button>
     </th>
   );
-  return <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">DAILY TOTALS</div><h2>Recorded requests</h2></div><span className="inventory-count">{formatCount(rows.length)} ROWS</span></div>
-    <div className="table-scroll"><table className="data-table"><thead><tr>
-      {sortHeader("date", "DATE")}{sortHeader("first_seen", "FIRST CALL (LOCAL)")}{sortHeader("last_seen", "LAST CALL (LOCAL)")}{sortHeader("user", "USER")}{sortHeader("agent", "AGENT")}{sortHeader("model", "MODEL")}{sortHeader("requests", "CALLS")}{sortHeader("input_tokens", "INPUT")}{sortHeader("output_tokens", "OUTPUT")}{sortHeader("cost", "COST")}
-    </tr></thead><tbody>{sortedRows.map((row, index) => <tr key={`${row.date}-${row.user}-${row.agent}-${row.model}-${index}`}><td>{displayDate(row.date, { month: "short", day: "numeric", year: "numeric" })}</td><td><time dateTime={row.first_seen || undefined}>{displayCallTime(row.first_seen)}</time></td><td><time dateTime={row.last_seen || undefined}>{displayCallTime(row.last_seen)}</time></td><td>{row.user}</td><td>{row.agent}</td><td>{row.model}</td><td>{formatCount(row.requests)}</td><td>{formatCount(row.input_tokens)}</td><td>{formatCount(row.output_tokens)}</td><td>{formatMoney(row.cost, currency)}</td></tr>)}</tbody></table>{!rows.length && <EmptyState loading={loading} label="No activity in this date range." />}</div>
-  </section>;
+
+  return (
+    <section className="panel full-panel">
+      <div className="panel-heading">
+        <div>
+          <div className="section-kicker">CALL ACTIVITY</div>
+          <h2>Recorded calls</h2>
+        </div>
+        <span className="inventory-count">{formatCount(events.length)} CALLS</span>
+      </div>
+      <div className="table-scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              {sortHeader("timestamp", "TIME (LOCAL)")}
+              {sortHeader("user", "USER")}
+              {sortHeader("agent", "AGENT")}
+              {sortHeader("model", "MODEL")}
+              {sortHeader("input_tokens", "INPUT TOKENS")}
+              {sortHeader("output_tokens", "OUTPUT TOKENS")}
+              {sortHeader("total_tokens", "TOTAL TOKENS")}
+              {sortHeader("latency_ms", "LATENCY")}
+              {sortHeader("cost", "EST. COST")}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedEvents.map((event, index) => {
+              const totalTokens = (event.input_tokens || 0) + (event.output_tokens || 0);
+              const latencyText =
+                event.latency_ms != null && event.latency_ms > 0
+                  ? event.latency_ms >= 1000
+                    ? `${(event.latency_ms / 1000).toFixed(2)}s`
+                    : `${Math.round(event.latency_ms)}ms`
+                  : "—";
+
+              return (
+                <tr key={`${event.key || event.timestamp}-${index}`}>
+                  <td>
+                    <time dateTime={event.timestamp}>
+                      {displayCallTime(event.timestamp)}
+                    </time>
+                  </td>
+                  <td>{event.user}</td>
+                  <td>{event.agent}</td>
+                  <td>{event.model}</td>
+                  <td>{formatCount(event.input_tokens)}</td>
+                  <td>{formatCount(event.output_tokens)}</td>
+                  <td>{formatCount(totalTokens)}</td>
+                  <td>{latencyText}</td>
+                  <td>{formatMoney(event.cost, currency)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!events.length && <EmptyState loading={loading} label="No call activity in this date range." />}
+      </div>
+    </section>
+  );
 }
