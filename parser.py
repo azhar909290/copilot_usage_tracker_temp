@@ -13,9 +13,14 @@ SKIP_OPERATIONS = set(
 # span -> agent name cache across batches (children can arrive before/after parents)
 _AGENT_CACHE: "OrderedDict[str, tuple[str | None, str | None, bool]]" = OrderedDict()
 _USER_CACHE: "OrderedDict[str, tuple[str | None, str | None]]" = OrderedDict()
-_TRACE_USER_CACHE: "OrderedDict[str, str]" = OrderedDict()
-_SESSION_USER_CACHE: "OrderedDict[str, str]" = OrderedDict()
+# Values are (user, tier); a None user marks conflicting identities.
+_TRACE_USER_CACHE: "OrderedDict[str, tuple[str | None, int]]" = OrderedDict()
+_SESSION_USER_CACHE: "OrderedDict[str, tuple[str | None, int]]" = OrderedDict()
 _CACHE_MAX = 50_000
+
+# Span identities describe the request; resource identities describe the sender.
+SPAN_TIER = 2
+RESOURCE_TIER = 1
 
 SESSION_ATTR_KEYS = (
     "gen_ai.conversation.id",
@@ -84,6 +89,24 @@ def _to_int(x) -> int:
         return 0
 
 
+def _remember_user(cache: OrderedDict, key: str, user: str, tier: int) -> None:
+    current = cache.get(key)
+    if current is None or tier > current[1]:
+        cache[key] = (user, tier)
+    elif tier == current[1] and current[0] != user:
+        cache[key] = (None, tier)
+    else:
+        return
+    cache.move_to_end(key)
+    if len(cache) > _CACHE_MAX:
+        cache.popitem(last=False)
+
+
+def _cached_user(cache: OrderedDict, key: str | None, tier: int) -> str | None:
+    entry = cache.get(key) if key else None
+    return entry[0] if entry and entry[1] == tier else None
+
+
 def _remember(trace_id: str, span_id: str, agent: str | None,
               mode: str | None, is_invocation: bool) -> None:
     _AGENT_CACHE[f"{trace_id}:{span_id}"] = (agent, mode, is_invocation)
@@ -102,34 +125,24 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
             for s in ss.get("spans", []):
                 a = attrs(s.get("attributes"))
                 span_user = _extract_user(a)
-                user = span_user or res_user
                 trace_id = s.get("traceId", "")
                 span_id = s.get("spanId", "")
                 session_id = _extract_session(a) or res_session
 
+                # Only span-level identity is inherited through the parent chain.
                 key = f"{trace_id}:{span_id}"
-                _USER_CACHE[key] = (user, s.get("parentSpanId"))
+                _USER_CACHE[key] = (span_user, s.get("parentSpanId"))
                 _USER_CACHE.move_to_end(key)
                 if len(_USER_CACHE) > _CACHE_MAX:
                     _USER_CACHE.popitem(last=False)
 
+                user, tier = (
+                    (span_user, SPAN_TIER) if span_user else (res_user, RESOURCE_TIER)
+                )
                 if user and trace_id:
-                    if trace_id in _TRACE_USER_CACHE and _TRACE_USER_CACHE[trace_id] != user:
-                        _TRACE_USER_CACHE[trace_id] = None
-                    elif trace_id not in _TRACE_USER_CACHE:
-                        _TRACE_USER_CACHE[trace_id] = user
-                        _TRACE_USER_CACHE.move_to_end(trace_id)
-                        if len(_TRACE_USER_CACHE) > _CACHE_MAX:
-                            _TRACE_USER_CACHE.popitem(last=False)
-
+                    _remember_user(_TRACE_USER_CACHE, trace_id, user, tier)
                 if user and session_id:
-                    if session_id in _SESSION_USER_CACHE and _SESSION_USER_CACHE[session_id] != user:
-                        _SESSION_USER_CACHE[session_id] = None
-                    elif session_id not in _SESSION_USER_CACHE:
-                        _SESSION_USER_CACHE[session_id] = user
-                        _SESSION_USER_CACHE.move_to_end(session_id)
-                        if len(_SESSION_USER_CACHE) > _CACHE_MAX:
-                            _SESSION_USER_CACHE.popitem(last=False)
+                    _remember_user(_SESSION_USER_CACHE, session_id, user, tier)
 
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
@@ -188,15 +201,19 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 if not parent_id:
                     break
                 span_id = parent_id
-            trace_user = _TRACE_USER_CACHE.get(trace_id) if trace_id else None
-            if trace_user:
-                return trace_user
-            session_user = _SESSION_USER_CACHE.get(session_id) if session_id else None
-            if session_user:
-                return session_user
-            if resource_user and resource_user != "unknown":
+            inherited = (
+                _cached_user(_TRACE_USER_CACHE, trace_id, SPAN_TIER)
+                or _cached_user(_SESSION_USER_CACHE, session_id, SPAN_TIER)
+            )
+            if inherited:
+                return inherited
+            if resource_user != "unknown":
                 return str(resource_user)
-            return "unknown"
+            return (
+                _cached_user(_TRACE_USER_CACHE, trace_id, RESOURCE_TIER)
+                or _cached_user(_SESSION_USER_CACHE, session_id, RESOURCE_TIER)
+                or "unknown"
+            )
 
         # 2) build events from spans that carry token usage
         for s in spans:

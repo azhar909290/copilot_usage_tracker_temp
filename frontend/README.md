@@ -64,6 +64,14 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 The overview includes call, token, estimated-cost, and unpriced-call totals; token trends; model mix; and agent activity. The Agents, Models, and Activity views share date, agent, model, and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
 
+The overview's live strip lists users whose most recent recorded model call
+started within the last 5 minutes, and the Users table highlights them with a
+LIVE badge. This is based on exported call start times, so it reflects recent
+Copilot model calls rather than an open VS Code window, and it depends on the
+client exporting promptly. `unknown` is excluded, and the view is not affected
+by the dashboard filters. Live status is recalculated every 15 seconds; new calls
+appear after the next data refresh.
+
 Activity rows remain daily aggregates, with first and last call timestamps shown
 in the browser's local timezone. Click an Activity table heading to sort by that
 column; click it again to reverse the sort. Recent activity shows and sorts by

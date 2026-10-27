@@ -171,6 +171,7 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const paletteRef = useRef<HTMLDialogElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -249,6 +250,7 @@ export default function Home() {
           );
         }
         setUpdatedAt(new Date());
+        setNow(Date.now());
         setError(null);
       } catch (loadError) {
         if (active) {
@@ -275,6 +277,11 @@ export default function Home() {
       if (interval) window.clearInterval(interval);
     };
   }, [autoRefresh, refreshKey]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const cutoffDate = updatedAt
     ? new Date(
@@ -327,6 +334,7 @@ export default function Home() {
       .filter((user) => user.trim().toLowerCase() !== "unknown"),
   ).size;
   const modelsUsed = new Set(filteredRows.map((row) => row.model)).size;
+  const liveUsers = getLiveUsers(callEvents, now);
 
   const dailyMap = new Map<string, DailyPoint>();
   for (const row of filteredRows) {
@@ -601,6 +609,7 @@ export default function Home() {
 
           {view === "overview" && (
             <>
+              <LiveUsers users={liveUsers} now={now} loading={loading} />
               <section className="metric-grid" aria-label="Usage totals">
                 <article className="metric-card metric-highlight">
                   <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
@@ -689,8 +698,8 @@ export default function Home() {
 
           {view === "users" && (
             <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>Usage by user</h2></div><span className="inventory-count">{userNames.length} USERS</span></div>
-              <UserTable rows={filteredRows} currency={currency} />
+              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>Usage by user</h2></div><span className="inventory-count">{userNames.length} USERS · {liveUsers.length} LIVE</span></div>
+              <UserTable rows={filteredRows} currency={currency} liveUsers={liveUsers} now={now} />
             </section>
           )}
 
@@ -1203,7 +1212,65 @@ function RecentActivity({
   );
 }
 
-function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
+const LIVE_WINDOW_MS = 5 * 60_000;
+
+type LiveUser = { user: string; lastSeen: number };
+
+function getLiveUsers(events: CallEvent[], now: number): LiveUser[] {
+  const latest = new Map<string, number>();
+  for (const event of events) {
+    if (event.user.trim().toLowerCase() === "unknown") continue;
+    const seen = Date.parse(event.timestamp);
+    if (Number.isNaN(seen) || now - seen > LIVE_WINDOW_MS) continue;
+    latest.set(event.user, Math.max(latest.get(event.user) ?? 0, seen));
+  }
+  return [...latest.entries()]
+    .map(([user, lastSeen]) => ({ user, lastSeen }))
+    .sort((a, b) => b.lastSeen - a.lastSeen);
+}
+
+function formatAgo(lastSeen: number, now: number) {
+  const minutes = Math.floor(Math.max(0, now - lastSeen) / 60_000);
+  return minutes < 1 ? "just now" : `${minutes} min ago`;
+}
+
+function LiveUsers({ users, now, loading }: { users: LiveUser[]; now: number; loading: boolean }) {
+  return (
+    <section className="live-users" aria-label="Users active in the last 5 minutes">
+      <div className="live-users-summary">
+        <span className={`live-dot${users.length ? " is-live" : ""}`} />
+        <strong>{loading ? "—" : formatCount(users.length)}</strong>
+        <span>{users.length === 1 ? "user" : "users"} active in the last 5 minutes</span>
+      </div>
+      {users.length ? (
+        <ul className="live-users-list">
+          {users.map((item) => (
+            <li className="live-user-chip" key={item.user}>
+              <span className="live-dot is-live" />
+              <strong>{item.user}</strong>
+              <time dateTime={new Date(item.lastSeen).toISOString()}>{formatAgo(item.lastSeen, now)}</time>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className="live-users-empty">{loading ? "Loading…" : "No recent Copilot calls."}</span>
+      )}
+    </section>
+  );
+}
+
+function UserTable({
+  rows,
+  currency,
+  liveUsers,
+  now,
+}: {
+  rows: UsageRow[];
+  currency: string;
+  liveUsers: LiveUser[];
+  now: number;
+}) {
+  const liveSince = new Map(liveUsers.map((item) => [item.user, item.lastSeen]));
   type UserSortKey = "user" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
   const [sort, setSort] = useState<{ key: UserSortKey; direction: "asc" | "desc" }>({
     key: "cost",
@@ -1301,9 +1368,18 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
           </tr>
         </thead>
         <tbody>
-          {sortedUsers.map((item) => (
-            <tr key={item.user}>
-              <td>{item.user}</td>
+          {sortedUsers.map((item) => {
+            const lastSeen = liveSince.get(item.user);
+            return (
+            <tr className={lastSeen !== undefined ? "user-row-live" : undefined} key={item.user}>
+              <td>
+                {item.user}
+                {lastSeen !== undefined && (
+                  <span className="live-badge" title={`Last call ${formatAgo(lastSeen, now)}`}>
+                    <span className="live-dot is-live" /> LIVE
+                  </span>
+                )}
+              </td>
               <td>{formatCount(item.requests)}</td>
               <td>{formatCount(item.input)}</td>
               <td>{formatCount(item.output)}</td>
@@ -1325,7 +1401,8 @@ function UserTable({ rows, currency }: { rows: UsageRow[]; currency: string }) {
                 </div>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
       {!userItems.length && <EmptyState loading={false} label="No user usage in this date range." />}

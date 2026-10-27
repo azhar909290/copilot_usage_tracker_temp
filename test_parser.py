@@ -270,6 +270,70 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(e2[0]["user"], "org-user-charlie")
         self.assertEqual(e2[0]["input_tokens"], 80)
 
+    def test_parent_span_identity_wins_over_resource_identity(self):
+        def batch(trace_id, resource_user):
+            return {"resourceSpans": [{
+                "resource": {"attributes": [attribute("user.name", resource_user)]},
+                "scopeSpans": [{"spans": [
+                    {"traceId": trace_id, "spanId": "root",
+                     "attributes": [attribute("gen_ai.operation.name", "invoke_agent"),
+                                    attribute("github.user.login", "octocat")]},
+                    {"traceId": trace_id, "spanId": "chat", "parentSpanId": "root",
+                     "attributes": [attribute("gen_ai.usage.input_tokens", 10)]},
+                    {"traceId": trace_id, "spanId": "unlinked",
+                     "attributes": [attribute("gen_ai.usage.input_tokens", 10)]},
+                ]}],
+            }]}
+
+        events = parse_spans(batch("parent-over-resource", "local-os-name"), PriceBook())
+        self.assertEqual([event["user"] for event in events], ["octocat", "octocat"])
+
+    def test_span_identity_from_later_batch_wins_over_resource_identity(self):
+        def batch(resource_user, span):
+            return {"resourceSpans": [{
+                "resource": {"attributes": [] if resource_user is None
+                             else [attribute("user.name", resource_user)]},
+                "scopeSpans": [{"spans": [span]}],
+            }]}
+
+        parse_spans(batch("local-os-name", {
+            "traceId": "tiered-trace", "spanId": "first",
+            "attributes": [attribute("gen_ai.usage.input_tokens", 10)],
+        }), PriceBook())
+        parse_spans(batch(None, {
+            "traceId": "tiered-trace", "spanId": "root",
+            "attributes": [attribute("user.name", "octocat")],
+        }), PriceBook())
+        events = parse_spans(batch(None, {
+            "traceId": "tiered-trace", "spanId": "later",
+            "attributes": [attribute("gen_ai.usage.input_tokens", 10)],
+        }), PriceBook())
+        self.assertEqual(events[0]["user"], "octocat")
+
+    def test_concurrent_users_are_isolated_and_conflicts_are_unknown(self):
+        def resource(user, trace_id, session_id):
+            return {
+                "resource": {"attributes": [attribute("user.name", user)]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": trace_id, "spanId": "chat",
+                    "attributes": [attribute("gen_ai.conversation.id", session_id),
+                                   attribute("gen_ai.usage.input_tokens", 10)],
+                }]}],
+            }
+
+        events = parse_spans({"resourceSpans": [
+            resource("alice", "trace-alice", "shared-session"),
+            resource("bob", "trace-bob", "shared-session"),
+        ]}, PriceBook())
+        self.assertEqual([event["user"] for event in events], ["alice", "bob"])
+
+        anonymous = {"resourceSpans": [{"scopeSpans": [{"spans": [{
+            "traceId": "trace-anonymous", "spanId": "chat",
+            "attributes": [attribute("gen_ai.conversation.id", "shared-session"),
+                           attribute("gen_ai.usage.input_tokens", 10)],
+        }]}]}]}
+        self.assertEqual(parse_spans(anonymous, PriceBook())[0]["user"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

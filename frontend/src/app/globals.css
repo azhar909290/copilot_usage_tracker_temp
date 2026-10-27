@@ -189,6 +189,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .data-table th { padding: 10px 9px; color: #8b938c; border-bottom: 1px solid #e9ebe3; font: 9px var(--font-mono); }
 .activity-sort-button { padding: 0; color: inherit; background: transparent; border: 0; font: inherit; text-align: left; cursor: pointer; }
 .activity-sort-button:hover { color: var(--accent); }
+.live-users { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 16px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 8px; }
+.live-users-summary { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.live-users-summary strong { color: var(--ink); font-size: 18px; }
+.live-users-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.live-user-chip { display: flex; align-items: center; gap: 7px; padding: 5px 10px; color: var(--ink); background: color-mix(in srgb, var(--green) 12%, transparent); border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); border-radius: 999px; font-size: 12px; }
+.live-user-chip time, .live-users-empty { color: var(--muted); font-size: 11px; }
+.live-dot { width: 8px; height: 8px; flex: 0 0 auto; display: inline-block; border-radius: 50%; background: var(--muted); }
+.live-dot.is-live { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent); }
+.live-badge { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; padding: 2px 7px; color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 40%, transparent); border-radius: 999px; font: 9px var(--font-mono); vertical-align: middle; }
+.data-table tbody tr.user-row-live { background: color-mix(in srgb, var(--green) 8%, transparent); }
+@media (prefers-reduced-motion: no-preference) { .live-dot.is-live { animation: live-pulse 1.8s ease-in-out infinite; } }
+@keyframes live-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--green) 0%, transparent); } }
 .data-table td { height: 50px; padding: 7px 9px; color: #5a655d; border-bottom: 1px solid #f0f1ec; font-size: 10px; }
 .data-table tbody tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover { background: #f8f9f4; }

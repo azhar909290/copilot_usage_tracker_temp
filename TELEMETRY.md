@@ -145,13 +145,29 @@ An OS-style name in the User column means that name was supplied through
 configuration supplied it. The receiver does **not** use `process.user.name` as a
 GitHub identity.
 
-The receiver prefers identity on a call or its ancestor spans, then the resource
-identity. Ancestor identity can be inherited across resource groups in the same
-request and earlier batches while the trace-scoped, bounded in-memory cache is
-available. A parent arriving in a later request does not retroactively update
-stored events; restarting the receiver clears this cache. `unknown` means no
-supported identity was available. Existing labels remain separate and are not
-automatically merged or assigned to a GitHub account.
+The receiver resolves identity in this order:
+
+1. The call span, then its ancestor spans (span attributes only).
+2. Another span in the same trace, then the same conversation/session, that
+   carries a span-level identity.
+3. The call's own resource identity (for example, `OTEL_RESOURCE_ATTRIBUTES`).
+4. A resource identity seen on the same trace, then session, in another resource
+   group or earlier batch.
+
+Span identity describes the request, while resource identity describes the
+sending process, so a GitHub login on a parent span wins over an OS-style
+resource `user.name`. If one trace or session carries two different identities
+at the same level, it is not used for inheritance, so calls fall back to the
+next step or `unknown` rather than being charged to the wrong user. Recognized
+user attributes are `user.name`, `enduser.id`, `user.id`, `github.actor`,
+`github.user.login`, `github.user`, `actor.login`, `user.login`,
+`enduser.pseudo.id`, `copilot.user`, `copilot.user.login`, and `copilot.actor`.
+
+Inheritance uses bounded in-memory caches and works across resource groups and
+earlier batches. A parent arriving in a later request does not retroactively
+update stored events; restarting the receiver clears these caches. `unknown`
+means no supported identity was available. Existing labels remain separate and
+are not automatically merged or assigned to a GitHub account.
 
 Seeing three labels does not by itself prove duplicate accounting. Event keys
 are trace ID plus span ID, and parent `invoke_agent` rollups are excluded by
