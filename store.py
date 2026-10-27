@@ -25,6 +25,7 @@ class UsageStore:
         self._lock = threading.Lock()
         self._seen: set[str] = set()
         self._daily: dict[tuple, dict] = {}
+        self._events: list[dict] = []
         self._replay()
 
     def _accumulate(self, e: dict) -> None:
@@ -65,6 +66,7 @@ class UsageStore:
                 e = json.loads(line)
                 self._seen.add(e["key"])
                 self._accumulate(e)
+                self._events.append(e)
 
     def _write_csv(self, path: Path, fields: list[str], rows: list[dict]) -> None:
         tmp = path.with_suffix(".tmp")
@@ -84,6 +86,7 @@ class UsageStore:
                     f.write(json.dumps(e) + "\n")
                     self._seen.add(e["key"])
                     self._accumulate(e)
+                    self._events.append(e)
             self._flush_csv()
             return len(new)
 
@@ -112,6 +115,7 @@ class UsageStore:
 
             self._seen.clear()
             self._daily.clear()
+            self._events.clear()
             self._replay()
             self._flush_csv()
             return deleted
@@ -142,3 +146,9 @@ class UsageStore:
                                   if r["latency_requests"] else None))
                 for (d, u, a, m), r in sorted(self._daily.items())
             ]
+
+    def get_events(self, limit: int | None = None) -> list[dict]:
+        with self._lock:
+            if limit and limit > 0:
+                return self._events[-limit:]
+            return list(self._events)

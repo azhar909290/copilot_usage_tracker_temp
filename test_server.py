@@ -62,6 +62,10 @@ class AgentTelemetryTests(unittest.TestCase):
                     self.assertEqual(row["first_seen"], row["last_seen"])
                     self.assertGreaterEqual(row["latency_ms_avg"], 0)
                     self.assertAlmostEqual(row["cost"], 0.000119)
+                events = server.usage()["events"]
+                self.assertEqual(len(events), 2)
+                self.assertEqual(events[0]["agent"], "Planner")
+                self.assertEqual(events[1]["agent"], "Reviewer")
                 asyncio.run(server.traces(request))
                 self.assertEqual(usage_store.summary(), rows)
 

@@ -177,7 +177,32 @@ async def ignore(request: Request):
     tags=["Usage"],
 )
 def usage():
-    return {"currency": prices.currency, "rows": store.summary()}
+    return {
+        "currency": prices.currency,
+        "rows": store.summary(),
+        "events": store.get_events(),
+    }
+
+
+@app.get("/activity", include_in_schema=False)
+@app.get("/events", include_in_schema=False)
+@app.get(
+    "/api/v1/activity",
+    name="get_activity_events",
+    operation_id="get_activity_events",
+    tags=["Usage"],
+)
+@app.get(
+    "/api/v1/events",
+    name="get_events",
+    operation_id="get_events",
+    tags=["Usage"],
+)
+def activity_events(limit: int = 10000):
+    return {
+        "currency": prices.currency,
+        "events": store.get_events(limit=limit),
+    }
 
 
 @app.delete(
