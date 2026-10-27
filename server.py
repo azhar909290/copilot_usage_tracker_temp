@@ -20,11 +20,23 @@ from github_metrics import GitHubMetrics, GitHubMetricsError
 from marketplace import MarketplaceCatalog
 from pricing import PriceBook
 from store import UsageStore
+from azure.monitor.opentelemetry import configure_azure_monitor
+
 
 load_dotenv()
 
 log = logging.getLogger("usage_api")
 logging.basicConfig(level=logging.INFO)
+
+applicationinsights_connection_string = os.getenv(
+    "APPLICATIONINSIGHTS_CONNECTION_STRING", ""
+).strip()
+if applicationinsights_connection_string:
+    configure_azure_monitor(
+        connection_string=applicationinsights_connection_string,
+        logger_name="usage_api",
+    )
+    log.info("Azure Monitor enabled for Application Insights")
 
 app = FastAPI(
     title="Copilot Usage API",
@@ -56,7 +68,6 @@ prices = PriceBook()
 store = UsageStore(os.getenv("DATA_DIR", "data"))
 marketplace = MarketplaceCatalog(os.path.join(store.dir, "marketplace_cache.json"))
 github_metrics = GitHubMetrics()
-
 
 @app.middleware("http")
 async def log_http_request(request: Request, call_next):
@@ -118,6 +129,22 @@ async def traces(request: Request):
     if added:
         cost = sum(e["cost"] for e in events)
         log.info("recorded %d LLM calls, batch cost %.6f %s", added, cost, prices.currency)
+        for ev in events:
+            log.info(
+                "gen_ai_agent_call",
+                extra={
+                    "custom_dimensions": {
+                        "user": ev["user"],
+                        "agent": ev["agent"],
+                        "model": ev["model"],
+                        "input_tokens": ev["input_tokens"],
+                        "output_tokens": ev["output_tokens"],
+                        "total_tokens": ev["total_tokens"],
+                        "cost": ev["cost"],
+                        "latency_ms": ev["latency_ms"] or 0,
+                    }
+                },
+            )
     # OTLP success response (empty ExportTraceServiceResponse)
     if "json" in ctype:
         return Response(content="{}", media_type="application/json")
