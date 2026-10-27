@@ -232,6 +232,44 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(events[0]["user"], "org-user-bob")
         self.assertEqual(events[0]["input_tokens"], 80)
 
+    def test_multi_batch_resource_and_session_identity_inherits(self):
+        # Scenario: Batch 1 has user identity in resource attributes (20 tokens)
+        # Batch 2 has no identity in resource attributes (80 tokens) but shares trace/session
+        p1 = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("user.name", "org-user-charlie")]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "multi-batch-trace", "spanId": "s1",
+                        "attributes": [
+                            attribute("gen_ai.conversation.id", "session-456"),
+                            attribute("gen_ai.usage.input_tokens", 20),
+                        ],
+                    }],
+                }],
+            }],
+        }
+        p2 = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("service.name", "copilot")]},
+                "scopeSpans": [{
+                    "spans": [{
+                        "traceId": "multi-batch-trace", "spanId": "s2",
+                        "attributes": [
+                            attribute("gen_ai.conversation.id", "session-456"),
+                            attribute("gen_ai.usage.input_tokens", 80),
+                        ],
+                    }],
+                }],
+            }],
+        }
+        e1 = parse_spans(p1, PriceBook())
+        e2 = parse_spans(p2, PriceBook())
+        self.assertEqual(e1[0]["user"], "org-user-charlie")
+        self.assertEqual(e1[0]["input_tokens"], 20)
+        self.assertEqual(e2[0]["user"], "org-user-charlie")
+        self.assertEqual(e2[0]["input_tokens"], 80)
+
 
 if __name__ == "__main__":
     unittest.main()

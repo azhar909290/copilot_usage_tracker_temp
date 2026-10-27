@@ -14,7 +14,17 @@ SKIP_OPERATIONS = set(
 _AGENT_CACHE: "OrderedDict[str, tuple[str | None, str | None, bool]]" = OrderedDict()
 _USER_CACHE: "OrderedDict[str, tuple[str | None, str | None]]" = OrderedDict()
 _TRACE_USER_CACHE: "OrderedDict[str, str]" = OrderedDict()
+_SESSION_USER_CACHE: "OrderedDict[str, str]" = OrderedDict()
 _CACHE_MAX = 50_000
+
+SESSION_ATTR_KEYS = (
+    "gen_ai.conversation.id",
+    "copilot_chat.session_id",
+    "copilot_chat.chat_session_id",
+    "conversation.id",
+    "conversation_id",
+    "session.id",
+)
 
 USER_ATTR_KEYS = (
     "user.name",
@@ -27,6 +37,8 @@ USER_ATTR_KEYS = (
     "user.login",
     "enduser.pseudo.id",
     "copilot.user",
+    "copilot.user.login",
+    "copilot.actor",
 )
 
 
@@ -40,7 +52,19 @@ def _extract_user(a: dict) -> str | None:
     return None
 
 
-def _val(v: dict):
+def _extract_session(a: dict) -> str | None:
+    if not a:
+        return None
+    for k in SESSION_ATTR_KEYS:
+        val = a.get(k)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return None
+
+
+def _val(v):
+    if not isinstance(v, dict):
+        return v
     for k in ("stringValue", "boolValue", "doubleValue"):
         if k in v:
             return v[k]
@@ -69,24 +93,43 @@ def _remember(trace_id: str, span_id: str, agent: str | None,
 
 def parse_spans(payload: dict, price_book) -> list[dict]:
     events: list[dict] = []
-    # Identity-bearing parents can be in another resource group or earlier batch.
+    # Pass 1: Cache identities (user, trace, session, and span hierarchy) across batches
     for rs in payload.get("resourceSpans", []):
+        res = attrs(rs.get("resource", {}).get("attributes"))
+        res_user = _extract_user(res)
+        res_session = _extract_session(res)
         for ss in rs.get("scopeSpans", []):
             for s in ss.get("spans", []):
                 a = attrs(s.get("attributes"))
-                user = _extract_user(a)
+                span_user = _extract_user(a)
+                user = span_user or res_user
                 trace_id = s.get("traceId", "")
                 span_id = s.get("spanId", "")
+                session_id = _extract_session(a) or res_session
+
                 key = f"{trace_id}:{span_id}"
                 _USER_CACHE[key] = (user, s.get("parentSpanId"))
                 _USER_CACHE.move_to_end(key)
                 if len(_USER_CACHE) > _CACHE_MAX:
                     _USER_CACHE.popitem(last=False)
+
                 if user and trace_id:
-                    _TRACE_USER_CACHE[trace_id] = user
-                    _TRACE_USER_CACHE.move_to_end(trace_id)
-                    if len(_TRACE_USER_CACHE) > _CACHE_MAX:
-                        _TRACE_USER_CACHE.popitem(last=False)
+                    if trace_id in _TRACE_USER_CACHE and _TRACE_USER_CACHE[trace_id] != user:
+                        _TRACE_USER_CACHE[trace_id] = None
+                    elif trace_id not in _TRACE_USER_CACHE:
+                        _TRACE_USER_CACHE[trace_id] = user
+                        _TRACE_USER_CACHE.move_to_end(trace_id)
+                        if len(_TRACE_USER_CACHE) > _CACHE_MAX:
+                            _TRACE_USER_CACHE.popitem(last=False)
+
+                if user and session_id:
+                    if session_id in _SESSION_USER_CACHE and _SESSION_USER_CACHE[session_id] != user:
+                        _SESSION_USER_CACHE[session_id] = None
+                    elif session_id not in _SESSION_USER_CACHE:
+                        _SESSION_USER_CACHE[session_id] = user
+                        _SESSION_USER_CACHE.move_to_end(session_id)
+                        if len(_SESSION_USER_CACHE) > _CACHE_MAX:
+                            _SESSION_USER_CACHE.popitem(last=False)
 
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
@@ -133,20 +176,27 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 hops += 1
             return nearest_name or default_agent
 
-        def resolve_user(span: dict) -> str:
+        def resolve_user(span: dict, span_attrs: dict) -> str:
             trace_id, span_id = span.get("traceId", ""), span.get("spanId", "")
+            session_id = _extract_session(span_attrs) or _extract_session(res)
             for _ in range(12):
-                user, parent_id = _USER_CACHE.get(
+                u, parent_id = _USER_CACHE.get(
                     f"{trace_id}:{span_id}", (None, None)
                 )
-                if user:
-                    return user
+                if u:
+                    return u
                 if not parent_id:
                     break
                 span_id = parent_id
-            if trace_id and trace_id in _TRACE_USER_CACHE:
-                return _TRACE_USER_CACHE[trace_id]
-            return str(resource_user)
+            trace_user = _TRACE_USER_CACHE.get(trace_id) if trace_id else None
+            if trace_user:
+                return trace_user
+            session_user = _SESSION_USER_CACHE.get(session_id) if session_id else None
+            if session_user:
+                return session_user
+            if resource_user and resource_user != "unknown":
+                return str(resource_user)
+            return "unknown"
 
         # 2) build events from spans that carry token usage
         for s in spans:
@@ -176,7 +226,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                     "key": f"{s.get('traceId','')}:{s.get('spanId','')}",
                     "timestamp": ts.isoformat(),
                     "date": ts.astimezone(DAILY_TZ).date().isoformat(),
-                    "user": resolve_user(s),
+                    "user": resolve_user(s, a),
                     "agent": resolve_agent(s),
                     "request_model": req_model,
                     "response_model": resp_model,
