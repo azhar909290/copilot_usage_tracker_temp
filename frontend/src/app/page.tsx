@@ -54,6 +54,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useDashboardTheme } from "./theme";
+import AgentNetwork from "./AgentNetwork";
 
 type UsageRow = {
   date: string;
@@ -739,7 +740,35 @@ export default function Home() {
             </section>
           )}
 
-          {view === "activity" && <ActivityTable events={filteredEvents} loading={loading} currency={currency} />}
+          {view === "activity" && (
+            <>
+              <AgentNetwork
+                events={filteredEvents}
+                rows={filteredRows}
+                loading={loading}
+                userList={userNames}
+                selectedUser={selectedUser}
+                selectedAgent={selectedAgent}
+                selectedModel={selectedModel}
+                onFilterUser={(u) => {
+                  setSelectedUser(u);
+                  setSelectedAgent("all");
+                  setSelectedModel("all");
+                }}
+                onFilterAgent={(a) => {
+                  setSelectedAgent(a);
+                  setSelectedUser("all");
+                  setSelectedModel("all");
+                }}
+                onFilterModel={(m) => {
+                  setSelectedModel(m);
+                  setSelectedUser("all");
+                  setSelectedAgent("all");
+                }}
+              />
+              <ActivityTable events={filteredEvents} loading={loading} currency={currency} />
+            </>
+          )}
 
           <footer className="page-footer"><span><span className="footer-status" /> RECEIVER {error ? "UNAVAILABLE" : "OPERATIONAL"}</span><span>{updatedAt ? `LAST SYNC ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "WAITING FOR DATA"}</span></footer>
         </div>

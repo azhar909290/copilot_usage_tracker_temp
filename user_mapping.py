@@ -77,6 +77,18 @@ DEFAULT_USER_MAPPINGS = {
     "125191": "san-bha",
     "kvssseshadrisastry": "seshadrisastrykvss",
     "saimaniyaswanthrejet": "Yaswanth77545",
+    "alex.novak": "san-bha",
+    "ananya.sharma": "Yaswanth77545",
+    "carlos.mendez": "azhar909290",
+    "david.kim": "HarshaSivakumar",
+    "elena.rostova": "ChandruM56",
+    "jordan.taylor": "seshadrisastrykvss",
+    "lisa.wong": "rajasekar1809",
+    "marcus.vance": "Hariharan07082002",
+    "priya.patel": "Keerthana-purushothaman",
+    "rachel.adams": "RamyaMurugan-tcs",
+    "samuel.green": "Ganeshkumar-Balu",
+    "sarah.chen": "Sanjay-Kumar-S-3",
 }
 
 

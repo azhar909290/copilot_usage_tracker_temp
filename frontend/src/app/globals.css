@@ -1403,3 +1403,384 @@ span.category-dot.cat-badge-platform { background: #f472b6; }
 	.content-wrap { padding: 20px 14px; }.page-heading h1 { font-size: 26px; }.filter-row { padding-bottom: 14px; }.search-field { border-color: var(--line); }.select-filter { min-width: 95px; }.metric-grid { gap: 10px; }.metric-card { padding: 14px 12px; min-height: 130px; }.metric-value { font-size: 24px; }.metric-foot { font-size: 10px; overflow: visible; }.metric-label { font-size: 9px; }
 	.trend-panel, .model-panel, .bottom-panel, .full-panel { padding-left: 0; padding-right: 0; }.heatmap-summary { min-width: 160px; }.chart-bottomline { flex-wrap: wrap; font-size: 9px; }.chart-bottomline .chart-period { display: none; }.recent-copy small { max-width: 155px; }.recent-tokens { font-size: 10px; }.recent-row time { font-size: 10px; }.page-footer { gap: 12px; flex-wrap: wrap; font-size: 8px; }
 }
+
+/* ==========================================================================
+   Agent Network Flow Graph & Three.js 3D Visualizer
+   ========================================================================== */
+
+.net-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.net-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.net-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.net-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.net-stat-pill strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.net-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.net-view-toggle {
+  display: inline-flex;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.net-view-btn {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.net-view-btn:hover {
+  color: var(--ink);
+}
+
+.net-view-btn.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.net-card {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.net-legend-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.net-legend-inline span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.net-legend-inline i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.net-wrap {
+  width: 100%;
+  overflow-x: auto;
+  position: relative;
+  padding: 12px 6px;
+  background: radial-gradient(circle at 50% 50%, rgba(30, 36, 60, 0.35) 0%, transparent 80%);
+}
+
+.net-svg {
+  width: 100%;
+  min-width: 950px;
+  display: block;
+}
+
+.net-col-text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-anchor: middle;
+}
+
+.net-edge path {
+  fill: none;
+}
+
+.edge-base {
+  opacity: 0.22;
+  transition: opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.edge-flow {
+  stroke-dasharray: 2 24;
+  opacity: 0.92;
+  animation: netFlow linear infinite;
+  stroke-linecap: round;
+}
+
+.net-edge.dim .edge-base {
+  opacity: 0.03;
+}
+
+.net-edge.dim .edge-flow {
+  opacity: 0.04;
+}
+
+.net-edge.lit .edge-base {
+  opacity: 0.5;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+.net-edge.lit .edge-flow {
+  opacity: 1;
+  stroke: #ffffff;
+  filter: drop-shadow(0 0 7px #ffffff);
+}
+
+.net-node {
+  cursor: pointer;
+  transition: opacity 0.3s ease, transform 0.2s ease;
+}
+
+.net-node.dim {
+  opacity: 0.2;
+}
+
+.net-node circle.node-core {
+  stroke: var(--surface);
+  stroke-width: 2.5;
+  transition: r 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.25s ease;
+}
+
+.net-node.user circle.node-core { fill: #3fa9ff; }
+.net-node.agent circle.node-core { fill: #7c5cff; }
+.net-node.model circle.node-core { fill: #2ee6a6; }
+
+.net-node .halo {
+  fill: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.net-node.user { color: #3fa9ff; }
+.net-node.agent { color: #7c5cff; }
+.net-node.model { color: #2ee6a6; }
+
+.net-node:hover .halo,
+.net-node.selected .halo {
+  opacity: 0.28;
+  animation: netBreathe 1.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.net-node text {
+  fill: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: fill 0.2s ease;
+  user-select: none;
+}
+
+.net-node .nv {
+  fill: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.net-node:hover text,
+.net-node.selected text {
+  fill: #ffffff;
+}
+
+/* Three.js 3D Canvas Container */
+.net-canvas-wrap {
+  width: 100%;
+  height: 560px;
+  position: relative;
+  background: #080a14;
+  overflow: hidden;
+}
+
+.net-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.net-canvas-overlay {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.net-canvas-overlay h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #3fa9ff;
+  text-transform: uppercase;
+}
+
+.net-canvas-overlay p {
+  margin: 0;
+  font-size: 11px;
+  color: #a0a6bf;
+}
+
+.net-canvas-controls {
+  position: absolute;
+  bottom: 14px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 18, 32, 0.75);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.net-canvas-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.net-canvas-btn:hover {
+  background: var(--surface-soft);
+}
+
+/* Hover Tooltip HUD */
+.net-tooltip {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  background: rgba(15, 18, 32, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  font-size: 11px;
+  color: var(--ink);
+  transform: translate(-50%, -100%);
+  margin-top: -12px;
+  white-space: nowrap;
+}
+
+.net-tooltip-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.net-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.net-tooltip-row strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+
+.net-filter-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(124, 92, 255, 0.12);
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #d1c4ff;
+  margin-bottom: 12px;
+}
+
+.net-filter-alert button {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: underline;
+  padding: 0;
+  margin-left: 8px;
+}
+
+@keyframes netFlow {
+  to {
+    stroke-dashoffset: -280;
+  }
+}
+
+@keyframes netBreathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.22;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.48;
+  }
+}
+
