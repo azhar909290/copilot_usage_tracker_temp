@@ -6,6 +6,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from user_mapping import normalize_user, FILE_EXTENSION_PATTERN
+
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
     "requests", "input_tokens", "output_tokens", "total_tokens", "cost", "unpriced_requests",
@@ -29,7 +31,17 @@ class UsageStore:
         self._replay()
 
     def _accumulate(self, e: dict) -> None:
-        k = (e["date"], e["user"], e["agent"], e["model"])
+        raw_user = e.get("user")
+        normalized = normalize_user(raw_user)
+        if normalized:
+            user = normalized
+        elif raw_user and not FILE_EXTENSION_PATTERN.search(str(raw_user)):
+            user = str(raw_user).strip()
+        else:
+            user = "unknown"
+        e["user"] = user
+
+        k = (e["date"], user, e["agent"], e["model"])
         r = self._daily.setdefault(
             k,
             dict(requests=0, input_tokens=0, output_tokens=0, total_tokens=0,
@@ -67,6 +79,7 @@ class UsageStore:
                 self._seen.add(e["key"])
                 self._accumulate(e)
                 self._events.append(e)
+        self._flush_csv()
 
     def _write_csv(self, path: Path, fields: list[str], rows: list[dict]) -> None:
         tmp = path.with_suffix(".tmp")
@@ -83,6 +96,9 @@ class UsageStore:
                 return 0
             with open(self.events_path, "a", encoding="utf-8") as f:
                 for e in new:
+                    norm = normalize_user(e.get("user"))
+                    if norm:
+                        e["user"] = norm
                     f.write(json.dumps(e) + "\n")
                     self._seen.add(e["key"])
                     self._accumulate(e)
