@@ -1,5 +1,6 @@
 """Turn OTLP trace payloads (as dicts) into usage events."""
 import os
+import re
 from collections import OrderedDict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -21,6 +22,27 @@ _CACHE_MAX = 50_000
 # Span identities describe the request; resource identities describe the sender.
 SPAN_TIER = 2
 RESOURCE_TIER = 1
+
+PATH_USER_PATTERN = re.compile(
+    r'(?:/(?:Users|home)/|[A-Za-z]:[/\\\\][Uu]sers[/\\\\])([a-zA-Z0-9._-]+)'
+)
+PROMPT_USER_PATTERN = re.compile(
+    r'([a-zA-Z0-9._-]+)@[a-zA-Z0-9._-]+(?:\s*[%$#>]|:)'
+)
+IGNORED_USERS = {
+    "root",
+    "daemon",
+    "nobody",
+    "runner",
+    "system",
+    "administrator",
+    "admin",
+    "service",
+    "public",
+    "default",
+    "shared",
+    "local-os-user",
+}
 
 SESSION_ATTR_KEYS = (
     "gen_ai.conversation.id",
@@ -44,6 +66,9 @@ USER_ATTR_KEYS = (
     "copilot.user",
     "copilot.user.login",
     "copilot.actor",
+    "user.email",
+    "user.full_name",
+    "github.login",
 )
 
 
@@ -54,6 +79,37 @@ def _extract_user(a: dict) -> str | None:
         val = a.get(k)
         if val is not None and str(val).strip():
             return str(val).strip()
+    return None
+
+
+def _extract_os_user(a: dict) -> str | None:
+    if not a:
+        return None
+    val = a.get("process.user.name")
+    if val is not None and str(val).strip():
+        s = str(val).strip()
+        if len(s) >= 3 and s.lower() not in IGNORED_USERS:
+            return s
+    return None
+
+
+def _extract_path_user(a: dict) -> str | None:
+    if not a:
+        return None
+    for k in ("copilot_chat.user_request", "gen_ai.input.messages", "context", "cwd"):
+        val = a.get(k)
+        if not val or not isinstance(val, str):
+            continue
+        m = PATH_USER_PATTERN.search(val)
+        if m:
+            u = m.group(1).strip()
+            if len(u) >= 3 and u.lower() not in IGNORED_USERS:
+                return u
+        m2 = PROMPT_USER_PATTERN.search(val)
+        if m2:
+            u = m2.group(1).strip()
+            if len(u) >= 3 and u.lower() not in IGNORED_USERS:
+                return u
     return None
 
 
@@ -119,34 +175,48 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
     # Pass 1: Cache identities (user, trace, session, and span hierarchy) across batches
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
-        res_user = _extract_user(res)
+        primary_res_user = _extract_user(res)
+        os_res_user = _extract_os_user(res)
+        res_user = primary_res_user or os_res_user
         res_session = _extract_session(res)
+
         for ss in rs.get("scopeSpans", []):
             for s in ss.get("spans", []):
                 a = attrs(s.get("attributes"))
                 span_user = _extract_user(a)
+                path_user = _extract_path_user(a)
+                effective_span_user = span_user or path_user
+
                 trace_id = s.get("traceId", "")
                 span_id = s.get("spanId", "")
-                session_id = _extract_session(a) or res_session
+                span_session = _extract_session(a)
 
                 # Only span-level identity is inherited through the parent chain.
                 key = f"{trace_id}:{span_id}"
-                _USER_CACHE[key] = (span_user, s.get("parentSpanId"))
+                _USER_CACHE[key] = (effective_span_user, s.get("parentSpanId"))
                 _USER_CACHE.move_to_end(key)
                 if len(_USER_CACHE) > _CACHE_MAX:
                     _USER_CACHE.popitem(last=False)
 
                 user, tier = (
-                    (span_user, SPAN_TIER) if span_user else (res_user, RESOURCE_TIER)
+                    (effective_span_user, SPAN_TIER) if effective_span_user
+                    else (res_user, RESOURCE_TIER)
                 )
-                if user and trace_id:
-                    _remember_user(_TRACE_USER_CACHE, trace_id, user, tier)
-                if user and session_id:
-                    _remember_user(_SESSION_USER_CACHE, session_id, user, tier)
+
+                if user:
+                    if trace_id:
+                        _remember_user(_TRACE_USER_CACHE, trace_id, user, tier)
+                    if span_session:
+                        _remember_user(_SESSION_USER_CACHE, span_session, user, tier)
+                    if res_session:
+                        _remember_user(_SESSION_USER_CACHE, res_session, user, tier)
 
     for rs in payload.get("resourceSpans", []):
         res = attrs(rs.get("resource", {}).get("attributes"))
-        resource_user = _extract_user(res) or "unknown"
+        primary_res_user = _extract_user(res)
+        os_res_user = _extract_os_user(res)
+        resource_user = primary_res_user or os_res_user or "unknown"
+        res_session = _extract_session(res)
         default_agent = res.get("service.name") or "copilot-chat"
 
         spans = [s for ss in rs.get("scopeSpans", []) for s in ss.get("spans", [])]
@@ -191,7 +261,10 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
 
         def resolve_user(span: dict, span_attrs: dict) -> str:
             trace_id, span_id = span.get("traceId", ""), span.get("spanId", "")
-            session_id = _extract_session(span_attrs) or _extract_session(res)
+            span_session = _extract_session(span_attrs)
+            path_user = _extract_path_user(span_attrs)
+
+            # 1. Direct span user cache hierarchy
             for _ in range(12):
                 u, parent_id = _USER_CACHE.get(
                     f"{trace_id}:{span_id}", (None, None)
@@ -201,17 +274,26 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 if not parent_id:
                     break
                 span_id = parent_id
-            inherited = (
+
+            # 2. Inherited SPAN_TIER (trace, span_session, or res_session)
+            inherited_span = (
                 _cached_user(_TRACE_USER_CACHE, trace_id, SPAN_TIER)
-                or _cached_user(_SESSION_USER_CACHE, session_id, SPAN_TIER)
+                or _cached_user(_SESSION_USER_CACHE, span_session, SPAN_TIER)
+                or _cached_user(_SESSION_USER_CACHE, res_session, SPAN_TIER)
+                or path_user
             )
-            if inherited:
-                return inherited
+            if inherited_span:
+                return inherited_span
+
+            # 3. Resource user
             if resource_user != "unknown":
                 return str(resource_user)
+
+            # 4. Inherited RESOURCE_TIER (trace, span_session, or res_session)
             return (
                 _cached_user(_TRACE_USER_CACHE, trace_id, RESOURCE_TIER)
-                or _cached_user(_SESSION_USER_CACHE, session_id, RESOURCE_TIER)
+                or _cached_user(_SESSION_USER_CACHE, span_session, RESOURCE_TIER)
+                or _cached_user(_SESSION_USER_CACHE, res_session, RESOURCE_TIER)
                 or "unknown"
             )
 
@@ -238,23 +320,26 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
             ts = datetime.fromtimestamp(
                 start_ns / 1e9, tz=timezone.utc
             )
-            events.append(
-                {
-                    "key": f"{s.get('traceId','')}:{s.get('spanId','')}",
-                    "timestamp": ts.isoformat(),
-                    "date": ts.astimezone(DAILY_TZ).date().isoformat(),
-                    "user": resolve_user(s, a),
-                    "agent": resolve_agent(s),
-                    "request_model": req_model,
-                    "response_model": resp_model,
-                    "model": resp_model or req_model or "unknown",
-                    "priced_as": key,
-                    "input_tokens": in_tok,
-                    "output_tokens": out_tok,
-                    "total_tokens": in_tok + out_tok,
-                    "latency_ms": latency_ms,
-                    "cost": round(cost, 8) if cost is not None else 0.0,
-                    "priced": cost is not None,
-                }
-            )
+            u = resolve_user(s, a)
+            ev = {
+                "key": f"{s.get('traceId','')}:{s.get('spanId','')}",
+                "timestamp": ts.isoformat(),
+                "date": ts.astimezone(DAILY_TZ).date().isoformat(),
+                "user": u,
+                "agent": resolve_agent(s),
+                "request_model": req_model,
+                "response_model": resp_model,
+                "model": resp_model or req_model or "unknown",
+                "priced_as": key,
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "total_tokens": in_tok + out_tok,
+                "latency_ms": latency_ms,
+                "cost": round(cost, 8) if cost is not None else 0.0,
+                "priced": cost is not None,
+            }
+            if u == "unknown":
+                ev["span_attributes"] = a
+                ev["resource_attributes"] = res
+            events.append(ev)
     return events

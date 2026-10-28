@@ -148,12 +148,28 @@ async def traces(request: Request):
                 },
             )
             if ev["user"] == "unknown":
+                span_attrs_summary = {
+                    k: str(v)[:200] for k, v in ev.get("span_attributes", {}).items()
+                } if "span_attributes" in ev else {}
+                res_attrs_summary = {
+                    k: str(v)[:200] for k, v in ev.get("resource_attributes", {}).items()
+                } if "resource_attributes" in ev else {}
+                extra_dim = {
+                    **dim,
+                    "span_keys": tuple(ev.get("span_attributes", {}).keys()),
+                    "res_keys": tuple(ev.get("resource_attributes", {}).keys()),
+                    "span_attrs": json.dumps(span_attrs_summary),
+                    "resource_attrs": json.dumps(res_attrs_summary),
+                }
                 log.warning(
-                    "unresolved_user_span key=%s model=%s tokens=%d agent=%s (lacks identity on span/trace)",
+                    "unresolved_user_span key=%s model=%s tokens=%d agent=%s span_keys=%s res_keys=%s",
                     ev["key"],
                     ev["model"],
                     ev["total_tokens"],
                     ev["agent"],
+                    list(ev.get("span_attributes", {}).keys())[:10],
+                    list(ev.get("resource_attributes", {}).keys()),
+                    extra={"custom_dimensions": extra_dim},
                 )
     # OTLP success response (empty ExportTraceServiceResponse)
     if "json" in ctype:

@@ -334,6 +334,85 @@ class ParserTests(unittest.TestCase):
         }]}]}]}
         self.assertEqual(parse_spans(anonymous, PriceBook())[0]["user"], "unknown")
 
+    def test_background_indexing_and_thinking_title_inherit_user_from_session(self):
+        # Turn 1: Interactive chat with client 0.58.0 sends prompt mentioning /Users/chandru/
+        # with session.id = "vscode-session-chandru"
+        chat_turn = {
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    attribute("service.version", "0.58.0"),
+                    attribute("session.id", "vscode-session-chandru"),
+                ]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "trace-chat", "spanId": "chat-span",
+                    "attributes": [
+                        attribute("copilot_chat.session_id", "conv-chandru-1"),
+                        attribute("copilot_chat.user_request", "Cwd: /Users/chandru/Desktop/app"),
+                        attribute("gen_ai.usage.input_tokens", 100),
+                    ],
+                }]}],
+            }],
+        }
+        e1 = parse_spans(chat_turn, PriceBook())
+        self.assertEqual(e1[0]["user"], "chandru")
+
+        # Turn 2: Background gpt-6-luna indexing call in the same VS Code session
+        # Has no user, no prompt, no path attributes
+        indexing_turn = {
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    attribute("service.version", "0.58.0"),
+                    attribute("session.id", "vscode-session-chandru"),
+                ]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "trace-indexing", "spanId": "index-span",
+                    "attributes": [
+                        attribute("gen_ai.request.model", "gpt-6-luna"),
+                        attribute("gen_ai.usage.input_tokens", 18500),
+                    ],
+                }]}],
+            }],
+        }
+        e2 = parse_spans(indexing_turn, PriceBook())
+        # Inherits "chandru" from the session!
+        self.assertEqual(e2[0]["user"], "chandru")
+
+        # Turn 3: thinkingTitle call in the same session
+        title_turn = {
+            "resourceSpans": [{
+                "resource": {"attributes": [
+                    attribute("service.version", "0.58.0"),
+                    attribute("session.id", "vscode-session-chandru"),
+                ]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "trace-title", "spanId": "title-span",
+                    "attributes": [
+                        attribute("gen_ai.agent.name", "copilotLanguageModelWrapper/thinkingTitle"),
+                        attribute("gen_ai.usage.input_tokens", 1640),
+                    ],
+                }]}],
+            }],
+        }
+        e3 = parse_spans(title_turn, PriceBook())
+        # Inherits "chandru" from the session!
+        self.assertEqual(e3[0]["user"], "chandru")
+
+    def test_path_user_rejects_single_letter_false_positives(self):
+        payload = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("service.name", "copilot")]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "trace-n", "spanId": "span-1",
+                    "attributes": [
+                        attribute("copilot_chat.user_request", "npm install -g n@latest"),
+                        attribute("gen_ai.usage.input_tokens", 20),
+                    ],
+                }]}],
+            }],
+        }
+        events = parse_spans(payload, PriceBook())
+        self.assertEqual(events[0]["user"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()
