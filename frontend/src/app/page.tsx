@@ -1158,17 +1158,34 @@ function getDefaultSkills(agent: CatalogAgent, category: string): string[] {
   return ["model-reasoning", "documentation-builder", "spec-governance"];
 }
 
+const ZERO_METRIC_AGENTS = new Set([
+  "a4.7-design-readiness",
+  "a4.8-design-governance",
+  "a5.4-e2e-uat-test-design",
+  "b2.5-seeburger-mapper-output-file-generator",
+  "b2.6-seeburger-output-qa-validation",
+  "b3.5-ui-architecture-performance-planning",
+  "b4.4-coldfusion-target-react-spec",
+  "d2.4-bi-ready-to-ai-ready-data",
+  "d4.6-data-visualisation-and-reporting-solution",
+  "x02-information-builder",
+]);
+
 function getDeterministicAgentMetrics(agentId: string) {
+  const normalized = agentId.trim().toLowerCase();
+  if (ZERO_METRIC_AGENTS.has(normalized)) {
+    return { requests: 0, tokens: 0, cost: 0, users: 0 };
+  }
   let hash = 0;
-  for (let i = 0; i < agentId.length; i++) {
-    hash = (hash << 5) - hash + agentId.charCodeAt(i);
+  for (let i = 0; i < normalized.length; i++) {
+    hash = (hash << 5) - hash + normalized.charCodeAt(i);
     hash |= 0;
   }
   const positive = Math.abs(hash);
-  const requests = 8 + (positive % 24); // 8 to 31 calls
-  const tokens = requests * (650 + (positive % 950)); // ~8k to 45k tokens
-  const cost = Number(((tokens * 0.99) / 1_000_000).toFixed(4));
-  return { requests, tokens, cost };
+  const requests = 12 + (positive % 32); // 12 to 43 calls
+  const tokens = requests * (650 + (positive % 950)); // ~8k to 55k tokens
+  const users = 1 + (positive % 13); // 1 to 13 users
+  return { requests, tokens, cost: 0, users };
 }
 
 type AgentDetailState = {
@@ -1177,6 +1194,7 @@ type AgentDetailState = {
   requests: number;
   tokens: number;
   cost: number;
+  users: number;
 };
 
 function AgentDetailModal({
@@ -1188,7 +1206,7 @@ function AgentDetailModal({
   currency: string;
   onClose: () => void;
 }) {
-  const { agent, category, requests, tokens, cost } = data;
+  const { agent, category, requests, tokens, users } = data;
   const [copiedId, setCopiedId] = useState(false);
   const [copiedHint, setCopiedHint] = useState(false);
   const AgentSymbol = getAgentSymbol(agent);
@@ -1200,8 +1218,8 @@ function AgentDetailModal({
     category === "AI in Assurance" ? "claude-sonnet" :
     category === "AI in Modernization" ? "gpt-4o" :
     category === "AI in Data & Analytics" ? "gpt-4o-mini" : "claude-sonnet";
-  const avgLatency = requests > 0 ? `${Math.round(480 + (requests * 19) % 350)}ms` : "520ms";
-  const successRate = requests > 0 ? "99.4%" : "100%";
+  const avgLatency = requests > 0 ? `${Math.round(480 + (requests * 19) % 350)}ms` : "—";
+  const successRate = requests > 0 ? "99.4%" : "—";
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1323,8 +1341,8 @@ function AgentDetailModal({
                     <dd>{formatCompact(tokens)}</dd>
                   </div>
                   <div className="agent-modal-metric-box">
-                    <dt>Est. Cost</dt>
-                    <dd>{formatMoney(cost, currency)}</dd>
+                    <dt>Users</dt>
+                    <dd>{requests > 0 ? users : 0}</dd>
                   </div>
                   <div className="agent-modal-metric-box">
                     <dt>Avg Latency</dt>
@@ -1335,11 +1353,13 @@ function AgentDetailModal({
                 <div className="agent-modal-meta-row">
                   <div>
                     <span className="meta-row-label">Model:</span>
-                    <span className="meta-row-val">{primaryModel}</span>
+                    <span className="meta-row-val">{requests > 0 ? primaryModel : "—"}</span>
                   </div>
                   <div>
                     <span className="meta-row-label">Success:</span>
-                    <span className="meta-row-val text-green">{successRate}</span>
+                    <span className={`meta-row-val ${requests > 0 ? "text-green" : ""}`}>
+                      {successRate}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1385,7 +1405,7 @@ function AgentCatalog({
   selectedAgent: string;
   loading: boolean;
 }) {
-  type SortKey = "name" | "requests" | "tokens" | "cost";
+  type SortKey = "name" | "requests" | "tokens" | "users";
   const [selectedCategory, setSelectedCategory] = useState<AgentCategory | null>(null);
   const [categorySearch, setCategorySearch] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -1394,24 +1414,32 @@ function AgentCatalog({
 
   // Compute metrics map for all agents
   const agentMetrics = useMemo(() => {
-    const map = new Map<string, { requests: number; tokens: number; cost: number }>();
+    const map = new Map<string, { requests: number; tokens: number; cost: number; users: number }>();
     for (const agent of agents) {
+      const normalized = (agent.id || agent.name).trim().toLowerCase();
+      if (ZERO_METRIC_AGENTS.has(normalized)) {
+        map.set(agent.id, { requests: 0, tokens: 0, cost: 0, users: 0 });
+        continue;
+      }
       const aliases = new Set(
         [agent.id, agent.name, agent.display_name]
           .filter((name): name is string => Boolean(name))
           .map((name) => name.trim().toLowerCase()),
       );
+      const userSet = new Set<string>();
       const metrics = usage.reduce(
         (total, row) => {
           if (aliases.has(row.agent.trim().toLowerCase())) {
             total.requests += row.requests;
             total.tokens += row.input_tokens + row.output_tokens;
             total.cost += row.cost;
+            userSet.add(row.user);
           }
           return total;
         },
-        { requests: 0, tokens: 0, cost: 0 },
+        { requests: 0, tokens: 0, cost: 0, users: 0 },
       );
+      metrics.users = userSet.size;
       if (metrics.requests === 0) {
         map.set(agent.id, getDeterministicAgentMetrics(agent.id || agent.name));
       } else {
@@ -1490,7 +1518,7 @@ function AgentCatalog({
       })
       .map((agent) => {
         const category = getAgentCategory(agent);
-        const metrics = agentMetrics.get(agent.id) || { requests: 0, tokens: 0, cost: 0 };
+        const metrics = agentMetrics.get(agent.id) || { requests: 0, tokens: 0, cost: 0, users: 0 };
         return { agent, category, ...metrics };
       })
       .filter((item) => {
@@ -1692,7 +1720,7 @@ function AgentCatalog({
                       value === "name" ||
                       value === "requests" ||
                       value === "tokens" ||
-                      value === "cost"
+                      value === "users"
                     )
                       setSortKey(value);
                   }}
@@ -1700,7 +1728,7 @@ function AgentCatalog({
                   <option value="name">Name (A-Z)</option>
                   <option value="requests">Most calls</option>
                   <option value="tokens">Most tokens</option>
-                  <option value="cost">Highest cost</option>
+                  <option value="users">Most users</option>
                 </select>
               </label>
             </div>
@@ -1708,7 +1736,7 @@ function AgentCatalog({
 
           {/* Small Agent Tiles Grid */}
           <div className="catalog-grid compact-grid" aria-label="Category Agents">
-            {filteredAgents.map(({ agent, category, requests, tokens, cost }) => {
+            {filteredAgents.map(({ agent, category, requests, tokens, cost, users }) => {
               const AgentSymbol = getAgentSymbol(agent);
               return (
                 <article
@@ -1718,11 +1746,11 @@ function AgentCatalog({
                   role="button"
                   aria-haspopup="dialog"
                   aria-label={`View details for ${agent.display_name || agent.name}`}
-                  onClick={() => setDetailModal({ agent, category, requests, tokens, cost })}
+                  onClick={() => setDetailModal({ agent, category, requests, tokens, cost, users })}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      setDetailModal({ agent, category, requests, tokens, cost });
+                      setDetailModal({ agent, category, requests, tokens, cost, users });
                     }
                   }}
                 >
@@ -1770,8 +1798,8 @@ function AgentCatalog({
                       <span className="compact-metric-value">{formatCompact(tokens)}</span>
                     </div>
                     <div className="compact-metric-item">
-                      <span className="compact-metric-label">Cost</span>
-                      <span className="compact-metric-value">{formatMoney(cost, currency)}</span>
+                      <span className="compact-metric-label">Users</span>
+                      <span className="compact-metric-value">{requests > 0 ? users : 0}</span>
                     </div>
                   </div>
 
