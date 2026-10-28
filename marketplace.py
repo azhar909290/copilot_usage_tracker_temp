@@ -1,24 +1,31 @@
-"""Load agent definitions referenced by a VS Code plugin marketplace."""
+"""Load the AgentVerse development journey's agent catalogue from GitHub."""
 import json
 import logging
 import os
+import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
-from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 import yaml
 
-DEFAULT_MARKETPLACE_URL = (
-    "https://github.com/tthctoinnovation/Plugins-Test/blob/main/.github/plugin/marketplace.json"
-)
+REPOSITORY = "tthctoinnovation/agentverse-devjourney"
+REPOSITORY_URL = f"https://github.com/{REPOSITORY}"
+DEFAULT_MARKETPLACE_URL = f"https://api.github.com/repos/{REPOSITORY}/git/trees/HEAD?recursive=1"
+CACHE_VERSION = 2
 log = logging.getLogger("agent_marketplace")
 
 
+def _headers() -> dict[str, str]:
+    token = os.getenv("AGENT_MARKETPLACE_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _fetch_json(url: str) -> dict:
-    response = requests.get(url, headers=_headers(), timeout=5)
+    response = requests.get(url, headers=_headers(), timeout=(5, 15))
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
@@ -27,35 +34,9 @@ def _fetch_json(url: str) -> dict:
 
 
 def _fetch_text(url: str) -> str:
-    response = requests.get(url, headers=_headers(), timeout=5)
+    response = requests.get(url, headers=_headers(), timeout=(5, 15))
     response.raise_for_status()
     return response.text
-
-
-def _headers() -> dict[str, str]:
-    token = os.getenv("AGENT_MARKETPLACE_TOKEN")
-    return {"Authorization": f"Bearer {token}"} if token else {}
-
-
-def _normalize_marketplace_url(url: str) -> str:
-    parsed = urlparse(url)
-    parts = parsed.path.strip("/").split("/")
-    if parsed.hostname == "github.com" and len(parts) >= 5 and parts[2] == "blob":
-        raw_path = "/".join((parts[0], parts[1], *parts[3:]))
-        return urlunparse(parsed._replace(netloc="raw.githubusercontent.com", path=f"/{raw_path}"))
-    return url
-
-
-def _safe_source(url: str) -> str:
-    parsed = urlparse(url)
-    return f"{parsed.scheme}://{parsed.hostname or ''}{parsed.path}"
-
-
-def _relative_url(base_url: str, path: str) -> str:
-    parsed = urlparse(path)
-    if parsed.scheme or parsed.netloc or path.startswith("/"):
-        raise ValueError(f"Expected a relative marketplace path: {path}")
-    return urljoin(base_url, path.removeprefix("./"))
 
 
 def _agent_metadata(markdown: str) -> dict:
@@ -72,93 +53,131 @@ def _agent_metadata(markdown: str) -> dict:
     return metadata
 
 
-def _load_agents(source_url: str, repository_root: str | None = None) -> list[dict]:
-    root = repository_root or urljoin(source_url, "../../")
-    marketplace = _fetch_json(source_url)
-    plugins = marketplace.get("plugins", [])
-    if not isinstance(plugins, list):
-        raise ValueError("Marketplace 'plugins' must be a list")
-
+def _catalogue_agents(markdown: str, path: str, revision: str) -> list[dict]:
     agents = []
-    for plugin in plugins:
-        if not isinstance(plugin, dict):
+    sections = re.finditer(
+        r"^#{4,6}\s+([A-Z]\d+\.\d+)\s+([^\n]+)\n(.*?)(?=^#{1,6}\s|\Z)",
+        markdown, re.MULTILINE | re.DOTALL,
+    )
+    for section in sections:
+        reference, title, body = section.groups()
+        if not re.search(r"\bBuilt\b", title):
             continue
-        manifest_path = plugin.get("path")
-        if not manifest_path:
-            source_path = plugin.get("source")
-            if not source_path:
-                continue
-            manifest_path = f"{source_path.rstrip('/')}/plugin.json"
-        manifest_url = _relative_url(root, str(manifest_path))
-        manifest = _fetch_json(manifest_url)
-        components = manifest.get("components", {})
-        agent_paths = components.get("agents", []) if isinstance(components, dict) else []
-        if not isinstance(agent_paths, list):
-            raise ValueError(f"Plugin {plugin.get('name', '')!r} agents must be a list")
-        skill_paths = components.get("skills", []) if isinstance(components, dict) else []
-        if not isinstance(skill_paths, list):
-            raise ValueError(f"Plugin {plugin.get('name', '')!r} skills must be a list")
-        agent_paths = [path for path in agent_paths if isinstance(path, str)]
-        skill_paths = [path for path in skill_paths if isinstance(path, str)]
-
-        for agent_path in agent_paths:
-            agent_url = _relative_url(manifest_url, agent_path)
-            markdown = _fetch_text(agent_url)
-            try:
-                metadata = _agent_metadata(markdown)
-            except (ValueError, yaml.YAMLError) as error:
-                raise ValueError(
-                    f"Invalid agent definition at {_safe_source(agent_url)}: {error}"
-                ) from error
-            name = str(metadata.get("name") or Path(agent_path).stem)
-            agents.append(
-                {
-                    "id": str(metadata.get("id") or name),
-                    "name": name,
-                    "description": str(metadata.get("description") or ""),
-                    "plugin_id": str(plugin.get("id") or plugin.get("name") or ""),
-                    "plugin_name": str(
-                        plugin.get("displayName") or plugin.get("name") or ""
-                    ),
-                    "version": str(plugin.get("version") or manifest.get("version") or ""),
-                    "path": agent_path,
-                    "kind": "agent",
-                    "skills": [],
-                }
-            )
-        if not agent_paths and skill_paths:
-            name = str(
-                manifest.get("displayName")
-                or plugin.get("displayName")
-                or manifest.get("name")
-                or plugin.get("name")
-                or Path(str(manifest_path)).parent.name
-            )
-            agents.append(
-                {
-                    "id": str(plugin.get("id") or manifest.get("name") or name),
-                    "name": name,
-                    "description": str(
-                        manifest.get("description") or plugin.get("description") or ""
-                    ),
-                    "plugin_id": str(plugin.get("id") or plugin.get("name") or ""),
-                    "plugin_name": str(
-                        plugin.get("displayName") or plugin.get("name") or name
-                    ),
-                    "version": str(plugin.get("version") or manifest.get("version") or ""),
-                    "path": str(manifest_path),
-                    "kind": "skill_package",
-                    "skills": skill_paths,
-                }
-            )
+        name = re.search(
+            r"Registered name:[*_` ]*([a-z][a-z0-9.]*-[a-z0-9-]+)",
+            body, re.IGNORECASE,
+        )
+        purpose = re.search(
+            r"\*\*Purpose:\*\*\s*(.+?)(?=\n\s*\n|\n\*\*|\Z)", body, re.DOTALL,
+        )
+        if not name or not purpose:
+            raise ValueError(f"Built agent {reference} in {path} is missing its name or purpose")
+        display_name = re.split(r"\s+Agent\s+", title, maxsplit=1)[0].strip()
+        agents.append({
+            "id": name[1],
+            "name": name[1],
+            "display_name": display_name,
+            "description": " ".join(purpose[1].split()),
+            "argument_hint": "",
+            "plugin_id": REPOSITORY,
+            "plugin_name": "AgentVerse DevJourney",
+            "version": "",
+            "status": "Built (catalogue)",
+            "path": path,
+            "url": f"{REPOSITORY_URL}/blob/{revision}/{path}",
+            "kind": "agent",
+            "skills": [],
+            "has_definition": False,
+            "catalogue": Path(path).stem,
+        })
     return agents
+
+
+def _load_agents(source_url: str) -> list[dict]:
+    listing = _fetch_json(source_url)
+    tree = listing.get("tree")
+    revision = listing.get("sha")
+    if (listing.get("truncated") or not isinstance(tree, list)
+            or not isinstance(revision, str) or not revision):
+        raise ValueError("GitHub returned an incomplete repository tree")
+    paths = {
+        item["path"] for item in tree
+        if isinstance(item, dict) and item.get("type") == "blob"
+        and isinstance(item.get("path"), str)
+    }
+    agent_paths = sorted(
+        path for path in paths
+        if path.startswith(".github/agents/") and path.endswith(".agent.md")
+    )
+    catalogue_paths = sorted(
+        path for path in paths
+        if path.startswith("docs/agent-catalogue/") and path.endswith(".md")
+    )
+    if not agent_paths and not catalogue_paths:
+        raise ValueError("No agent definitions found in the repository's .github/agents directory")
+
+    def load_agent(path: str) -> dict:
+        identifier = Path(path).name.removesuffix(".agent.md")
+        raw_root = f"https://raw.githubusercontent.com/{REPOSITORY}/{revision}"
+        try:
+            metadata = _agent_metadata(_fetch_text(f"{raw_root}/{path}"))
+            manifest_path = f".github/manifests/{identifier}.manifest.yaml"
+            manifest = {}
+            if manifest_path in paths:
+                manifest = yaml.safe_load(_fetch_text(f"{raw_root}/{manifest_path}"))
+                if not isinstance(manifest, dict):
+                    raise ValueError("Agent manifest must be a YAML object")
+            details = manifest.get("agent", {})
+            skills = manifest.get("skills", [])
+            if not isinstance(details, dict) or not isinstance(skills, list):
+                raise ValueError("Agent manifest has invalid agent details or skills")
+            return {
+                "id": identifier,
+                "name": str(metadata.get("name") or identifier),
+                "display_name": str(details.get("name") or metadata.get("name") or identifier),
+                "description": str(metadata.get("description") or ""),
+                "argument_hint": str(metadata.get("argument-hint") or ""),
+                "plugin_id": REPOSITORY,
+                "plugin_name": "AgentVerse DevJourney",
+                "version": str(details.get("version") or ""),
+                "status": str(details.get("status") or ""),
+                "path": path,
+                "url": f"{REPOSITORY_URL}/blob/{revision}/{path}",
+                "kind": "agent",
+                "has_definition": True,
+                "skills": [
+                    skill["name"] for skill in skills
+                    if isinstance(skill, dict) and isinstance(skill.get("name"), str)
+                ],
+            }
+        except (ValueError, yaml.YAMLError) as error:
+            raise ValueError(f"Invalid agent definition at {path}: {error}") from error
+
+    # Pin every definition and manifest to the same revision.
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        definitions = list(executor.map(load_agent, agent_paths))
+        catalogues = list(executor.map(
+            _fetch_text,
+            [f"https://raw.githubusercontent.com/{REPOSITORY}/{revision}/{path}"
+             for path in catalogue_paths],
+        ))
+    agents = {}
+    for path, markdown in zip(catalogue_paths, catalogues):
+        for agent in _catalogue_agents(markdown, path, revision):
+            agents.setdefault(agent["id"], agent)
+    for definition in definitions:
+        documented = agents.get(definition["id"])
+        if documented:
+            definition["catalogue"] = documented["catalogue"]
+        agents[definition["id"]] = definition
+    if not agents:
+        raise ValueError("No Built agents or executable definitions found in the repository")
+    return [agents[key] for key in sorted(agents)]
 
 
 class MarketplaceCatalog:
     def __init__(self, cache_path: str):
-        source_url = os.getenv("AGENT_MARKETPLACE_URL", DEFAULT_MARKETPLACE_URL)
-        self.source_url = _normalize_marketplace_url(source_url)
-        self.repository_root = os.getenv("AGENT_MARKETPLACE_ROOT_URL") or None
+        self.source_url = DEFAULT_MARKETPLACE_URL
         self.cache_path = Path(cache_path)
         self.ttl = max(0, int(os.getenv("AGENT_MARKETPLACE_TTL", "300")))
         self._lock = threading.Lock()
@@ -170,13 +189,25 @@ class MarketplaceCatalog:
         self._read_cache()
 
     def _read_cache(self) -> None:
+        if not self.cache_path.exists():
+            return
         try:
             cached = json.loads(self.cache_path.read_text(encoding="utf-8"))
+            if not isinstance(cached, dict):
+                raise ValueError("Cached catalogue must be an object")
+            if (cached.get("source") != self.source_url
+                    or cached.get("version") != CACHE_VERSION):
+                log.info("catalog_cache_ignored reason=source_changed")
+                return
+            if (not isinstance(cached.get("agents"), list)
+                    or any(not isinstance(agent, dict) or agent.get("kind") != "agent"
+                           for agent in cached["agents"])):
+                raise ValueError("Invalid cached agent catalogue")
             self._agents = cached["agents"]
             self._loaded_at = cached["loaded_at"]
             self._loaded_monotonic = monotonic() - self.ttl
-        except (OSError, ValueError, KeyError, TypeError):
-            return
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            log.warning("catalog_cache_unreadable error=%s", error)
 
     def get(self) -> dict:
         with self._lock:
@@ -188,39 +219,34 @@ class MarketplaceCatalog:
 
             self._last_attempt = now
             try:
-                agents = _load_agents(self.source_url, self.repository_root)
+                agents = _load_agents(self.source_url)
                 loaded_at = datetime.now(timezone.utc).isoformat()
                 self.cache_path.parent.mkdir(parents=True, exist_ok=True)
                 temporary = self.cache_path.with_suffix(".tmp")
                 temporary.write_text(
-                    json.dumps({"loaded_at": loaded_at, "agents": agents}, indent=2),
+                    json.dumps({"source": self.source_url, "version": CACHE_VERSION,
+                                "loaded_at": loaded_at,
+                                "agents": agents}, indent=2),
                     encoding="utf-8",
                 )
                 os.replace(temporary, self.cache_path)
                 self._agents = agents
                 self._loaded_at = loaded_at
-                self._loaded_monotonic = now
+                self._loaded_monotonic = monotonic()
                 self._error = None
-                log.info(
-                    "marketplace_refresh_succeeded source=%s agent_count=%d",
-                    _safe_source(self.source_url),
-                    len(agents),
-                )
+                log.info("catalog_refresh_succeeded agent_count=%d", len(agents))
             except (OSError, ValueError, requests.RequestException, yaml.YAMLError) as error:
                 self._error = str(error)
                 status = getattr(getattr(error, "response", None), "status_code", None)
                 log.warning(
-                    "marketplace_refresh_failed source=%s status=%s error_type=%s cached_agents=%d",
-                    _safe_source(self.source_url),
-                    status or "n/a",
-                    type(error).__name__,
-                    len(self._agents),
+                    "catalog_refresh_failed status=%s error_type=%s cached_agents=%d",
+                    status or "n/a", type(error).__name__, len(self._agents),
                 )
             return self._response()
 
     def _response(self) -> dict:
         return {
-            "source": self.source_url,
+            "source": REPOSITORY_URL,
             "loaded_at": self._loaded_at,
             "stale": bool(self._error and self._agents),
             "error": self._error,

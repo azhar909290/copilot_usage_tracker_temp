@@ -3,24 +3,42 @@
 import {
   Activity,
   ArrowDownToLine,
+  ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
+  Binary,
   Bot,
   Boxes,
+  Braces,
+  BrainCircuit,
+  Check,
   ChevronDown,
   CircleHelp,
   Clock3,
+  Code,
   Command,
+  Compass,
+  Copy,
   Cpu,
+  Database,
+  FileText,
   GitBranch,
+  Layers,
+  Layers2,
   LayoutDashboard,
   LoaderCircle,
   Moon,
+  Network,
   RefreshCw,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Sun,
+  Terminal,
+  TestTube,
   Users,
+  Workflow,
   X,
   Zap,
 } from "lucide-react";
@@ -33,7 +51,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useDashboardTheme } from "./theme";
 
@@ -68,11 +86,17 @@ type CallEvent = {
 type CatalogAgent = {
   id: string;
   name: string;
+  display_name?: string;
   description: string;
+  argument_hint?: string;
   plugin_id: string;
   plugin_name: string;
   version: string;
+  status?: string;
+  has_definition?: boolean;
+  catalogue?: string;
   path: string;
+  url?: string;
   kind?: "agent" | "skill_package";
   skills?: string[];
 };
@@ -297,7 +321,7 @@ export default function Home() {
     const matchesModel = selectedModel === "all" || row.model === selectedModel;
     const query = search.trim().toLowerCase();
     const matchesSearch =
-      !query ||
+      view === "agents" || !query ||
       [row.date, row.user, row.agent, row.model].some((value) =>
         value.toLowerCase().includes(query),
       );
@@ -367,7 +391,11 @@ export default function Home() {
   for (const row of filteredRows) {
     agentMap.set(row.agent, (agentMap.get(row.agent) || 0) + row.requests);
   }
-  const agentNames = [...new Set([...usageRows.map((row) => row.agent), ...callEvents.map((e) => e.agent)])].sort();
+  const agentNames = [...new Set([
+    ...usageRows.map((row) => row.agent),
+    ...callEvents.map((event) => event.agent),
+    ...(catalog?.agents ?? []).map((agent) => agent.name),
+  ])].sort();
   const modelNames = [...new Set([...usageRows.map((row) => row.model), ...callEvents.map((e) => e.model)])].sort();
   const userNames = [...new Set([...usageRows.map((row) => row.user), ...callEvents.map((e) => e.user)])].sort();
   const activeLabel = navigation.find((item) => item.id === view)?.label || "Overview";
@@ -690,8 +718,9 @@ export default function Home() {
 
           {view === "agents" && (
             <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">MARKETPLACE INVENTORY</div><h2>Agents, skill packages, and tracked usage</h2></div><span className="inventory-count">{catalog?.agents.length ?? 0} ITEMS LISTED</span></div>
-              <AgentTable agents={catalog?.agents || []} usage={filteredRows} currency={currency} />
+              <div className="panel-heading"><div><div className="section-kicker">AGENTVERSE DEVJOURNEY</div><h2>Agent catalogue</h2></div><span className="inventory-count">{catalog?.agents.length ?? 0} AGENTS</span></div>
+              <p className="catalog-caption">Built agents documented across enterprise engineering domains. Select a domain below to browse agents.</p>
+              <AgentCatalog agents={catalog?.agents || []} usage={filteredRows} currency={currency} search={search} selectedAgent={selectedAgent} loading={loading} />
               {!!catalog?.error && <p className="table-note">Catalog refresh issue: {catalog.error}</p>}
             </section>
           )}
@@ -856,6 +885,843 @@ function ModelTable({
   );
 }
 
+type AgentCategory =
+  | "AI in SDLC"
+  | "AI in Assurance"
+  | "AI in Modernization"
+  | "AI in Data & Analytics"
+  | "AI Platform & Tools";
+
+interface CategoryMeta {
+  id: AgentCategory;
+  name: string;
+  shortName: string;
+  catalogueMatch: string;
+  description: string;
+  badgeClass: string;
+  icon: any;
+}
+
+const CATEGORY_LIST: CategoryMeta[] = [
+  {
+    id: "AI in SDLC",
+    name: "AI in SDLC",
+    shortName: "SDLC",
+    catalogueMatch: "A-DEV",
+    description: "Software development lifecycle agents for product discovery, user stories, architecture, code generation, and DevOps pipelines.",
+    badgeClass: "cat-badge-sdlc",
+    icon: Sparkles,
+  },
+  {
+    id: "AI in Assurance",
+    name: "AI in Assurance",
+    shortName: "Assurance",
+    catalogueMatch: "A-ASR",
+    description: "Quality assurance and testing agents: risk-led test strategy, automated test design, regression suites, and entry/exit sign-off verification.",
+    badgeClass: "cat-badge-asr",
+    icon: ShieldAlert,
+  },
+  {
+    id: "AI in Modernization",
+    name: "AI in Modernization",
+    shortName: "Modernization",
+    catalogueMatch: "B-MOD",
+    description: "Enterprise legacy modernization: TIBCO extraction, IBM Sterling & Seeburger migration, Swing to Angular, and ColdFusion to React transformations.",
+    badgeClass: "cat-badge-mod",
+    icon: RefreshCw,
+  },
+  {
+    id: "AI in Data & Analytics",
+    name: "AI in Data & Analytics",
+    shortName: "Data & AI",
+    catalogueMatch: "D-DATA",
+    description: "Data platform agents: automated data engineering, ETL/ELT pipelines, transformation code generation, metadata governance, and analytical intelligence.",
+    badgeClass: "cat-badge-data",
+    icon: Boxes,
+  },
+  {
+    id: "AI Platform & Tools",
+    name: "AI Platform & Tools",
+    shortName: "Platform",
+    catalogueMatch: "OTHER",
+    description: "Core AI platform documentation builders, specification analyzers, and developer toolchain agents.",
+    badgeClass: "cat-badge-platform",
+    icon: Cpu,
+  },
+];
+
+function getAgentCategory(agent: CatalogAgent): AgentCategory {
+  const cat = agent.catalogue || "";
+  if (cat.includes("A-DEV")) return "AI in SDLC";
+  if (cat.includes("A-ASR")) return "AI in Assurance";
+  if (cat.includes("B-MOD")) return "AI in Modernization";
+  if (cat.includes("D-DATA")) return "AI in Data & Analytics";
+  return "AI Platform & Tools";
+}
+
+function getCategoryBadgeClass(category: string): string {
+  switch (category) {
+    case "AI in SDLC":
+      return "cat-badge-sdlc";
+    case "AI in Assurance":
+      return "cat-badge-asr";
+    case "AI in Modernization":
+      return "cat-badge-mod";
+    case "AI in Data & Analytics":
+      return "cat-badge-data";
+    case "AI Platform & Tools":
+      return "cat-badge-platform";
+    default:
+      return "cat-badge-all";
+  }
+}
+
+function getAgentSymbol(agent: CatalogAgent) {
+  const name = (agent.name || "").toLowerCase();
+  const id = (agent.id || "").toLowerCase();
+  const title = (agent.display_name || "").toLowerCase();
+  const combined = `${id} ${name} ${title}`;
+
+  // Testing & Quality Assurance
+  if (
+    combined.includes("test") ||
+    combined.includes("qa") ||
+    combined.includes("validation") ||
+    combined.includes("assurance")
+  ) {
+    if (combined.includes("strategy") || combined.includes("risk")) return ShieldAlert;
+    if (
+      combined.includes("functional") ||
+      combined.includes("integration") ||
+      combined.includes("e2e") ||
+      combined.includes("uat") ||
+      combined.includes("nfr")
+    ) {
+      return TestTube;
+    }
+    return ShieldCheck;
+  }
+
+  // Code generation & Software Engineering
+  if (
+    combined.includes("codegen") ||
+    combined.includes("software-engineer") ||
+    combined.includes("code-generation") ||
+    combined.includes("implementation-codegen")
+  ) {
+    return Code;
+  }
+  if (combined.includes("build") || combined.includes("terminal")) {
+    return Terminal;
+  }
+
+  // Modernization, Migration & Reverse Engineering
+  if (
+    combined.includes("migration") ||
+    combined.includes("modernisation") ||
+    combined.includes("modernize")
+  ) {
+    return RefreshCw;
+  }
+  if (
+    combined.includes("tibco") ||
+    combined.includes("sterling") ||
+    combined.includes("seeburger") ||
+    combined.includes("reverse-engineering") ||
+    combined.includes("decomposition") ||
+    combined.includes("extraction")
+  ) {
+    return Binary;
+  }
+  if (
+    combined.includes("swing") ||
+    combined.includes("coldfusion") ||
+    combined.includes("angular") ||
+    combined.includes("react")
+  ) {
+    return Braces;
+  }
+
+  // Conversational AI, Knowledge & Intelligence
+  if (
+    combined.includes("talk-to-data") ||
+    combined.includes("knowledge") ||
+    combined.includes("intelligence") ||
+    combined.includes("evaluator")
+  ) {
+    return BrainCircuit;
+  }
+
+  // Data Engineering & Analytics
+  if (
+    combined.includes("data") ||
+    combined.includes("bigquery") ||
+    combined.includes("teradata") ||
+    combined.includes("etl")
+  ) {
+    if (
+      combined.includes("lineage") ||
+      combined.includes("dependency") ||
+      combined.includes("contract")
+    ) {
+      return Network;
+    }
+    if (combined.includes("visualisation") || combined.includes("reporting")) {
+      return Layers2;
+    }
+    if (
+      combined.includes("mapping") ||
+      combined.includes("pipeline") ||
+      combined.includes("workflow")
+    ) {
+      return Workflow;
+    }
+    return Database;
+  }
+
+  // Requirements, User Journeys, Rules & Specifications
+  if (
+    combined.includes("requirement") ||
+    combined.includes("journey") ||
+    combined.includes("rule") ||
+    combined.includes("story") ||
+    combined.includes("backlog") ||
+    combined.includes("specification") ||
+    combined.includes("fsd") ||
+    combined.includes("glossary") ||
+    combined.includes("dictionary")
+  ) {
+    return FileText;
+  }
+
+  // Architecture & Solution Design
+  if (
+    combined.includes("architecture") ||
+    combined.includes("design") ||
+    combined.includes("solution")
+  ) {
+    return Layers;
+  }
+
+  // Product Discovery & Ideation
+  if (
+    combined.includes("discovery") ||
+    combined.includes("ideation") ||
+    combined.includes("product")
+  ) {
+    return Compass;
+  }
+
+  // Fallback by Domain / Category
+  const cat = getAgentCategory(agent);
+  if (cat === "AI in SDLC") return Sparkles;
+  if (cat === "AI in Assurance") return ShieldAlert;
+  if (cat === "AI in Modernization") return RefreshCw;
+  if (cat === "AI in Data & Analytics") return Database;
+  return Bot;
+}
+
+type AgentDetailState = {
+  agent: CatalogAgent;
+  category: string;
+  requests: number;
+  tokens: number;
+  cost: number;
+};
+
+function AgentDetailModal({
+  data,
+  currency,
+  onClose,
+}: {
+  data: AgentDetailState;
+  currency: string;
+  onClose: () => void;
+}) {
+  const { agent, category, requests, tokens, cost } = data;
+  const [copiedId, setCopiedId] = useState(false);
+  const [copiedHint, setCopiedHint] = useState(false);
+  const AgentSymbol = getAgentSymbol(agent);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const copyText = (text: string, type: "id" | "hint") => {
+    navigator.clipboard?.writeText(text);
+    if (type === "id") {
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2000);
+    } else {
+      setCopiedHint(true);
+      setTimeout(() => setCopiedHint(false), 2000);
+    }
+  };
+
+  return (
+    <div
+      className="agent-modal-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="agent-modal-title"
+    >
+      <div className="agent-modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <header className="agent-modal-header">
+          <div className="agent-modal-header-main">
+            <span className={`agent-modal-avatar ${getCategoryBadgeClass(category)}`}>
+              <AgentSymbol size={24} />
+            </span>
+            <div className="agent-modal-title-group">
+              <div className="agent-modal-top-tags">
+                <span className={`category-badge-chip ${getCategoryBadgeClass(category)}`}>
+                  {category}
+                </span>
+                <span className={`usage-pill-compact ${requests > 0 ? "active" : ""}`}>
+                  <span className="usage-dot" />
+                  {requests > 0 ? "Telemetry Tracked" : "No telemetry recorded"}
+                </span>
+              </div>
+              <h2 id="agent-modal-title">{agent.display_name || agent.name}</h2>
+              <div className="agent-modal-id-bar">
+                <code>{agent.name}</code>
+                <button
+                  type="button"
+                  className="modal-copy-btn"
+                  onClick={() => copyText(agent.name, "id")}
+                  title="Copy Agent ID"
+                  aria-label="Copy Agent ID"
+                >
+                  {copiedId ? <Check size={12} /> : <Copy size={12} />}
+                  <span>{copiedId ? "Copied" : "Copy ID"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="agent-modal-close-btn"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="agent-modal-body">
+          <div>
+            <div className="agent-modal-section-title">Overview & Capabilities</div>
+            <p className="agent-modal-desc">
+              {agent.description || "No description provided in catalogue definition."}
+            </p>
+          </div>
+
+          <div>
+            <div className="agent-modal-section-title">Tracked Usage & Telemetry</div>
+            <div className="agent-modal-metrics-grid">
+              <div className="agent-modal-metric-box">
+                <dt>Calls</dt>
+                <dd>{formatCount(requests)}</dd>
+              </div>
+              <div className="agent-modal-metric-box">
+                <dt>Tokens</dt>
+                <dd>{formatCompact(tokens)}</dd>
+              </div>
+              <div className="agent-modal-metric-box">
+                <dt>Est. Cost</dt>
+                <dd>{formatMoney(cost, currency)}</dd>
+              </div>
+            </div>
+          </div>
+
+          {agent.argument_hint && (
+            <div>
+              <div className="agent-modal-section-header">
+                <div className="agent-modal-section-title">Usage Arguments / Prompt Format</div>
+                <button
+                  type="button"
+                  className="modal-copy-btn"
+                  onClick={() => copyText(agent.argument_hint || "", "hint")}
+                >
+                  {copiedHint ? <Check size={12} /> : <Copy size={12} />}
+                  <span>{copiedHint ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+              <pre className="agent-modal-code-block">
+                <code>{agent.argument_hint}</code>
+              </pre>
+            </div>
+          )}
+
+          {!!agent.skills?.length && (
+            <div>
+              <div className="agent-modal-section-title">
+                Equipped Skills ({agent.skills.length})
+              </div>
+              <div className="agent-modal-skills-list">
+                {agent.skills.map((skill) => (
+                  <span className="agent-modal-skill-tag" key={skill}>
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {agent.path && (
+            <div className="agent-modal-path-note">
+              <span>Source path:</span> <code>{agent.path}</code>
+            </div>
+          )}
+        </div>
+
+        <footer className="agent-modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function AgentCatalog({
+  agents,
+  usage,
+  currency,
+  search,
+  selectedAgent,
+  loading,
+}: {
+  agents: CatalogAgent[];
+  usage: UsageRow[];
+  currency: string;
+  search: string;
+  selectedAgent: string;
+  loading: boolean;
+}) {
+  type SortKey = "name" | "requests" | "tokens" | "cost";
+  const [selectedCategory, setSelectedCategory] = useState<AgentCategory | null>(null);
+  const [categorySearch, setCategorySearch] = useState<string>("");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [onlyTracked, setOnlyTracked] = useState<boolean>(false);
+  const [detailModal, setDetailModal] = useState<AgentDetailState | null>(null);
+
+  // Compute metrics map for all agents
+  const agentMetrics = useMemo(() => {
+    const map = new Map<string, { requests: number; tokens: number; cost: number }>();
+    for (const agent of agents) {
+      const aliases = new Set(
+        [agent.id, agent.name, agent.display_name]
+          .filter((name): name is string => Boolean(name))
+          .map((name) => name.trim().toLowerCase()),
+      );
+      const metrics = usage.reduce(
+        (total, row) => {
+          if (aliases.has(row.agent.trim().toLowerCase())) {
+            total.requests += row.requests;
+            total.tokens += row.input_tokens + row.output_tokens;
+            total.cost += row.cost;
+          }
+          return total;
+        },
+        { requests: 0, tokens: 0, cost: 0 },
+      );
+      map.set(agent.id, metrics);
+    }
+    return map;
+  }, [agents, usage]);
+
+  // Summaries per Category Tile
+  const categoryTiles = useMemo(() => {
+    return CATEGORY_LIST.map((meta) => {
+      const catAgents = agents.filter((a) => getAgentCategory(a) === meta.id);
+      let totalCalls = 0;
+      let totalTokens = 0;
+      let totalCost = 0;
+      let trackedCount = 0;
+
+      for (const agent of catAgents) {
+        const m = agentMetrics.get(agent.id);
+        if (m) {
+          totalCalls += m.requests;
+          totalTokens += m.tokens;
+          totalCost += m.cost;
+          if (m.requests > 0) trackedCount += 1;
+        }
+      }
+
+      return {
+        meta,
+        agents: catAgents,
+        agentCount: catAgents.length,
+        trackedCount,
+        totalCalls,
+        totalTokens,
+        totalCost,
+      };
+    });
+  }, [agents, agentMetrics]);
+
+  const activeCategoryMeta = selectedCategory
+    ? CATEGORY_LIST.find((c) => c.id === selectedCategory) || null
+    : null;
+
+  // Active agents when inside a category or global search
+  const query = (search || categorySearch).trim().toLowerCase();
+
+  const filteredAgents = useMemo(() => {
+    return agents
+      .filter((agent) => {
+        const category = getAgentCategory(agent);
+        if (selectedCategory && category !== selectedCategory) {
+          return false;
+        }
+
+        const matchesAgent =
+          selectedAgent === "all" ||
+          [agent.id, agent.name, agent.display_name].some(
+            (name) => name?.toLowerCase() === selectedAgent.toLowerCase(),
+          );
+
+        const matchesSearch =
+          !query ||
+          [
+            agent.id,
+            agent.name,
+            agent.display_name,
+            agent.description,
+            agent.path,
+            agent.catalogue,
+            category,
+            ...(agent.skills ?? []),
+          ].some((value) => value?.toLowerCase().includes(query));
+
+        return matchesAgent && matchesSearch;
+      })
+      .map((agent) => {
+        const category = getAgentCategory(agent);
+        const metrics = agentMetrics.get(agent.id) || { requests: 0, tokens: 0, cost: 0 };
+        return { agent, category, ...metrics };
+      })
+      .filter((item) => {
+        if (onlyTracked && item.requests === 0) return false;
+        return true;
+      })
+      .sort((a, b) =>
+        sortKey === "name"
+          ? a.agent.name.localeCompare(b.agent.name)
+          : b[sortKey] - a[sortKey] || a.agent.name.localeCompare(b.agent.name),
+      );
+  }, [agents, selectedCategory, selectedAgent, query, agentMetrics, onlyTracked, sortKey]);
+
+  // If a top-level search query is typed while in category tile view, show search results
+  const isBrowsingCategory = selectedCategory !== null;
+  const isGlobalSearchActive = !selectedCategory && Boolean(query);
+
+  return (
+    <>
+      {/* LEVEL 1: Category Tiles View */}
+      {!isBrowsingCategory && !isGlobalSearchActive && (
+        <div className="category-hub-section">
+          <div className="category-hub-intro">
+            <h3 className="category-hub-heading">Select a domain</h3>
+            <span className="inventory-count">5 DOMAINS · {agents.length} AGENTS</span>
+          </div>
+
+          <div className="category-hub-grid" role="region" aria-label="AI Agent Categories">
+            {categoryTiles.map(
+              ({
+                meta,
+                agentCount,
+              }) => {
+                const Icon = meta.icon;
+                return (
+                  <article
+                    key={meta.id}
+                    className={`category-domain-card ${meta.badgeClass}`}
+                    onClick={() => {
+                      setSelectedCategory(meta.id);
+                      setCategorySearch("");
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Open ${meta.name} domain containing ${agentCount} agents`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedCategory(meta.id);
+                        setCategorySearch("");
+                      }
+                    }}
+                  >
+                    <div className="category-domain-top">
+                      <div className="category-domain-icon-wrap">
+                        <Icon size={18} />
+                      </div>
+                      <span className="category-domain-count-badge">
+                        {agentCount} {agentCount === 1 ? "Agent" : "Agents"}
+                      </span>
+                    </div>
+
+                    <div className="category-domain-bottom">
+                      <h3 className="category-domain-title">{meta.name}</h3>
+                      <div className="category-domain-action">
+                        <span>Explore</span>
+                        <ArrowRight size={13} className="domain-arrow" />
+                      </div>
+                    </div>
+                  </article>
+                );
+              },
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* LEVEL 2: Inside Category - Small Agent Tiles */}
+      {(isBrowsingCategory || isGlobalSearchActive) && (
+        <div className="category-drilldown-section">
+          {/* Breadcrumb & Quick Switcher */}
+          <div className="category-drilldown-header">
+            <button
+              type="button"
+              className="category-back-btn"
+              onClick={() => {
+                setSelectedCategory(null);
+                setCategorySearch("");
+              }}
+              title="Return to all domain tiles"
+            >
+              <ArrowLeft size={15} />
+              <span>All Domains</span>
+            </button>
+
+            {/* Quick Domain Switcher Pills */}
+            <div className="category-switcher-pills" role="tablist" aria-label="Switch Domain">
+              {CATEGORY_LIST.map((meta) => {
+                const isCurrent = selectedCategory === meta.id;
+                const count = agents.filter((a) => getAgentCategory(a) === meta.id).length;
+                return (
+                  <button
+                    key={meta.id}
+                    role="tab"
+                    aria-selected={isCurrent}
+                    type="button"
+                    className={`category-switch-pill ${isCurrent ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedCategory(meta.id);
+                      setCategorySearch("");
+                    }}
+                  >
+                    <span className={`category-dot ${meta.badgeClass}`} />
+                    <span>{meta.shortName}</span>
+                    <span className="category-switch-count">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Current Category Banner */}
+          {activeCategoryMeta && (
+            <div className={`category-active-banner ${activeCategoryMeta.badgeClass}`}>
+              <div className="category-banner-icon">
+                <activeCategoryMeta.icon size={28} />
+              </div>
+              <div className="category-banner-info">
+                <div className="category-banner-title-row">
+                  <h2>{activeCategoryMeta.name}</h2>
+                  <span className="category-banner-count">
+                    {filteredAgents.length} Agents listed
+                  </span>
+                </div>
+                <p>{activeCategoryMeta.description}</p>
+              </div>
+            </div>
+          )}
+
+          {isGlobalSearchActive && !activeCategoryMeta && (
+            <div className="category-search-notice">
+              <span>Showing search results for <strong>&ldquo;{query}&rdquo;</strong> across all domains</span>
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => {
+                  setCategorySearch("");
+                  setSelectedCategory(null);
+                }}
+              >
+                Clear search to see domain tiles
+              </button>
+            </div>
+          )}
+
+          {/* Sub-toolbar inside Category */}
+          <div className="catalog-toolbar">
+            <div className="catalog-toolbar-left">
+              <div className="category-search-box">
+                <Search size={14} />
+                <input
+                  type="text"
+                  placeholder={`Search in ${activeCategoryMeta?.shortName || "agents"}...`}
+                  value={categorySearch}
+                  onChange={(e) => setCategorySearch(e.target.value)}
+                  aria-label="Filter agents inside this domain"
+                />
+                {categorySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCategorySearch("")}
+                    aria-label="Clear filter"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className={`catalog-tracked-filter ${onlyTracked ? "active" : ""}`}
+                onClick={() => setOnlyTracked(!onlyTracked)}
+                title="Toggle only agents with recorded telemetry"
+              >
+                <span className="usage-dot" />
+                <span>Tracked only</span>
+              </button>
+            </div>
+
+            <div className="catalog-toolbar-right">
+              <label className="select-filter">
+                <span className="select-filter-label">Sort:</span>
+                <select
+                  aria-label="Sort agents"
+                  value={sortKey}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (
+                      value === "name" ||
+                      value === "requests" ||
+                      value === "tokens" ||
+                      value === "cost"
+                    )
+                      setSortKey(value);
+                  }}
+                >
+                  <option value="name">Name (A-Z)</option>
+                  <option value="requests">Most calls</option>
+                  <option value="tokens">Most tokens</option>
+                  <option value="cost">Highest cost</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {/* Small Agent Tiles Grid */}
+          <div className="catalog-grid compact-grid" aria-label="Category Agents">
+            {filteredAgents.map(({ agent, category, requests, tokens, cost }) => {
+              const AgentSymbol = getAgentSymbol(agent);
+              return (
+                <article
+                  className="compact-tile"
+                  key={agent.id}
+                  tabIndex={0}
+                  role="button"
+                  aria-haspopup="dialog"
+                  aria-label={`View details for ${agent.display_name || agent.name}`}
+                  onClick={() => setDetailModal({ agent, category, requests, tokens, cost })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setDetailModal({ agent, category, requests, tokens, cost });
+                    }
+                  }}
+                >
+                  <div className="compact-tile-top">
+                    <span className={`category-badge-chip ${getCategoryBadgeClass(category)}`}>
+                      {category === "AI Platform & Tools"
+                        ? "Platform"
+                        : category.replace("AI in ", "")}
+                    </span>
+                    <span className={`usage-pill-compact ${requests > 0 ? "active" : ""}`}>
+                      <span className="usage-dot" />
+                      {requests > 0 ? "Tracked" : "Unused"}
+                    </span>
+                  </div>
+
+                  <div className="compact-tile-main">
+                    <div className="compact-tile-identity">
+                      <span
+                        className={`compact-agent-symbol ${getCategoryBadgeClass(category)}`}
+                        aria-hidden="true"
+                      >
+                        <AgentSymbol size={18} />
+                      </span>
+                      <div className="compact-tile-title-group">
+                        <h4 className="compact-tile-title" title={agent.display_name || agent.name}>
+                          {agent.display_name || agent.name}
+                        </h4>
+                        <div className="compact-tile-id" title={agent.name}>
+                          <code>{agent.name}</code>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="compact-tile-desc" title={agent.description}>
+                      {agent.description || "No description provided."}
+                    </p>
+                  </div>
+
+                  <div className="compact-metrics">
+                    <div className="compact-metric-item">
+                      <span className="compact-metric-label">Calls</span>
+                      <span className="compact-metric-value">{formatCount(requests)}</span>
+                    </div>
+                    <div className="compact-metric-item">
+                      <span className="compact-metric-label">Tokens</span>
+                      <span className="compact-metric-value">{formatCompact(tokens)}</span>
+                    </div>
+                    <div className="compact-metric-item">
+                      <span className="compact-metric-label">Cost</span>
+                      <span className="compact-metric-value">{formatMoney(cost, currency)}</span>
+                    </div>
+                  </div>
+
+                  <div className="compact-tile-footer">
+                    <span className="compact-source-label">
+                      {agent.has_definition ? ".agent.md" : "catalogue"}
+                    </span>
+                    <span className="compact-click-hint">Click for details →</span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {!filteredAgents.length && (
+            <EmptyState
+              loading={loading}
+              label="No agents in this domain match your search or filter criteria."
+            />
+          )}
+        </div>
+      )}
+
+      {/* LEVEL 3: Agent Detail Modal */}
+      {detailModal && (
+        <AgentDetailModal
+          data={detailModal}
+          currency={currency}
+          onClose={() => setDetailModal(null)}
+        />
+      )}
+    </>
+  );
+}
+
 function AgentTable({
   agents,
   usage,
@@ -912,6 +1778,7 @@ function AgentTable({
           <tbody>
             {visibleAgents.map((agent, index) => {
               const isSkillPackage = agent.kind === "skill_package";
+              const AgentSymbol = getAgentSymbol(agent);
               const key = isSkillPackage
                 ? undefined
                 : [agent.name, agent.id]
@@ -922,7 +1789,7 @@ function AgentTable({
                 <tr key={`${agent.plugin_id}-${agent.id}-${index}`}>
                   <td>
                     <span className={`agent-avatar agent-avatar-${index % 4}`}>
-                      {isSkillPackage ? <Boxes size={16} /> : <Bot size={16} />}
+                      {isSkillPackage ? <Boxes size={16} /> : <AgentSymbol size={16} />}
                     </span>
                     <span className="agent-name-cell">
                       <strong>{agent.name}</strong>

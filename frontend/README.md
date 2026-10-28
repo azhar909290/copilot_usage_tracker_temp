@@ -53,7 +53,7 @@ Open [http://localhost:3000](http://localhost:3000). Set `NEXT_PUBLIC_USAGE_API_
 The dashboard requests these endpoints directly from the browser:
 
 - `GET /api/v1/usage` returns daily usage aggregates and currency.
-- `GET /api/v1/agents` returns marketplace agents and refresh status.
+- `GET /api/v1/agents` returns AgentVerse DevJourney agent definitions and refresh status.
 - `GET /api/v1/health` returns receiver health.
 - `GET /api/v1/github/metrics` returns GitHub organization and per-user usage
   reports without a dashboard login.
@@ -62,7 +62,36 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 ## Dashboard
 
-The overview includes call, token, estimated-cost, and unpriced-call totals; token trends; model mix; and agent activity. The Agents, Models, and Activity views share date, agent, model, and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
+The overview includes usage totals, token trends, model mix, and agent activity.
+The dashboard also supports auto-refresh and usage CSV export.
+
+### Agent catalogue
+
+The **Catalog** view is a responsive tile grid containing only agents defined in
+[`tthctoinnovation/agentverse-devjourney`](https://github.com/tthctoinnovation/agentverse-devjourney)
+under `.github/agents/**/*.agent.md`. Skills and manifest-only entries are not
+separate catalogue items. The receiver discovers definitions dynamically from
+the default branch and reads every definition and matching manifest at the same
+Git revision.
+
+Tiles show the agent's display name, telemetry name, full description, manifest
+version/status, skills, usage arguments, definition link, and matched call,
+token, and estimated-cost totals. Search matches agent metadata; the agent
+filter narrows tiles. Date, user, and model filters affect tile usage metrics.
+Tiles can be sorted by name, calls, tokens, or cost. Agents with no matching
+telemetry remain visible with zero usage. Telemetry-only agents are excluded
+from the catalogue but remain available in usage/activity reporting.
+
+Set `AGENT_MARKETPLACE_TOKEN` on the Python server to a GitHub token with read
+access to this repository (fine-grained tokens need repository Contents read
+permission). Never put this token in frontend environment variables. Restart
+the API after changing configuration. `AGENT_MARKETPLACE_TTL` sets the refresh
+interval in seconds (default 300), with a 30-second retry cooldown on failure.
+The old `AGENT_MARKETPLACE_URL` and `AGENT_MARKETPLACE_ROOT_URL` overrides no
+longer select catalogue sources: this catalogue is restricted to DevJourney.
+Older plugin-marketplace caches are ignored. A failed refresh retains only a
+previously saved catalogue from this same source and displays a refresh warning;
+without a matching cache, the catalogue is empty with an explicit error.
 
 The overview's live strip lists users whose most recent recorded model call
 started within the last 5 minutes, and the Users table highlights them with a

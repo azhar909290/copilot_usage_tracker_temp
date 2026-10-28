@@ -43,7 +43,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=[
         {"name": "Usage", "description": "Aggregated usage and cost reports."},
-        {"name": "Agents", "description": "Marketplace catalog and agent usage."},
+        {"name": "Agents", "description": "AgentVerse repository catalogue and agent usage."},
         {"name": "GitHub", "description": "Organization Copilot metrics."},
         {"name": "System", "description": "Service health checks."},
         {"name": "OpenTelemetry", "description": "OpenTelemetry ingestion endpoints."},
