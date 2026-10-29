@@ -7,15 +7,16 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 import requests
 import uvicorn
 
-import server
 from github_metrics import (
     API_VERSION, COUNTERS, MAX_REPORT_BYTES, GitHubMetrics, GitHubMetricsError,
     _decode_report, _summarize_organization, _summarize_users,
 )
+from tracker.api import create_app
+from tracker.config import Settings
 
 
 def counts(prompts=10):
@@ -259,20 +260,21 @@ class GitHubClientTests(unittest.TestCase):
 
 class GitHubEndpointTests(unittest.TestCase):
     def test_metrics_load_without_dashboard_authentication(self):
-        with patch.object(server.github_metrics, "get") as get:
-            with patch.dict(os.environ, {}, clear=True):
-                get.return_value = {"organization": "test"}
-                self.assertEqual(server.get_github_metrics(),
-                                 {"organization": "test"})
-                get.assert_called_once_with()
+        metrics = Mock()
+        metrics.get.return_value = {"organization": "test"}
+        with patch.dict(os.environ, {}, clear=True):
+            response = TestClient(create_app(Settings(), github_metrics=metrics)).get(
+                "/api/v1/github/metrics")
+        self.assertEqual(response.json(), {"organization": "test"})
+        metrics.get.assert_called_once_with()
 
     def test_upstream_failure_is_explicit(self):
-        with patch.object(server.github_metrics, "get",
-                          side_effect=GitHubMetricsError("Report unavailable")):
-            with self.assertRaises(HTTPException) as failure:
-                server.get_github_metrics()
-        self.assertEqual(failure.exception.status_code, 503)
-        self.assertEqual(failure.exception.detail, "Report unavailable")
+        metrics = Mock()
+        metrics.get.side_effect = GitHubMetricsError("Report unavailable")
+        response = TestClient(create_app(Settings(), github_metrics=metrics)).get(
+            "/api/v1/github/metrics")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Report unavailable")
 
     def test_http_no_login_cors_cache_control_and_normalized_payload(self):
         client = GitHubMetrics()
@@ -284,9 +286,8 @@ class GitHubEndpointTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             endpoint = f"http://127.0.0.1:{listener.getsockname()[1]}/api/v1/github/metrics"
-            runner = uvicorn.Server(uvicorn.Config(server.app, log_level="error"))
+            runner = uvicorn.Server(uvicorn.Config(create_app(Settings(), github_metrics=client), log_level="error"))
             with patch.dict(os.environ, ENV, clear=True), \
-                    patch.object(server, "github_metrics", client), \
                     patch.object(client, "_get_json", side_effect=[
                         metadata, metadata,
                     ]) as upstream, \

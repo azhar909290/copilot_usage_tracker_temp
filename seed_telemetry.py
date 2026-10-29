@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generates fabricated historical telemetry for previous dates (10M - 40M tokens/day).
+"""Generates FABRICATED historical telemetry (10M - 40M tokens/day) for demos.
 
-Can either:
-1. Write directly to the local data/ ledger using UsageStore (--direct).
-2. Send OTLP/JSON batches over HTTP to /v1/traces (--endpoint).
+Sends OTLP/JSON to /v1/traces. Everything sent lands in the Log Analytics tables, so
+point --endpoint at a non-production receiver. As in real Copilot traffic, each trace
+is sent as an LLM call without identity, then the agent invocation span carrying
+``user.name`` in a later request.
 """
 import argparse
 import json
@@ -13,10 +14,15 @@ import secrets
 from datetime import datetime, timezone
 import urllib.request
 
-from pricing import PriceBook
-from parser import parse_spans
-from store import UsageStore
-from user_mapping import TEAM_GITHUB_USERS
+TEAM_GITHUB_USERS = [
+    "AnirudhTrivedi", "anishkgeorge", "ar-arunkumar", "Ashik1598753", "azhar909290",
+    "Beaulah10", "chaitanyakarra1", "ChandruM56", "codebyjay", "ESavitha", "eswarasai-25",
+    "Ganeshkumar-Balu", "gnaneeshwar-a-d", "gokulkv2003", "guna2sam", "gunasekart",
+    "Hariharan07082002", "HarshaSivakumar", "Keerthana-purushothaman", "Kumaravel-V10",
+    "njpp", "parth-bisht-tcs", "rajasekar1809", "rajeshwarinarasimhan", "RamyaMurugan-tcs",
+    "rishi-tcs", "san-bha", "Sanjay-Kumar-S-3", "seshadrisastrykvss", "shanmugajaganathan",
+    "Skamalesh16", "Srivatsan133", "tcs-dineshsharma", "Vikas1610-S", "Yaswanth77545",
+]
 
 AGENTS = [
     "a1.1-product-discovery",
@@ -58,47 +64,43 @@ def _attribute(key: str, val):
     return {"key": key, "value": {"stringValue": str(val)}}
 
 
-def generate_trace_payload(user: str, agent: str, req_model: str, resp_model: str,
-                           input_tokens: int, output_tokens: int,
-                           timestamp_dt: datetime) -> dict:
+def generate_trace_payloads(user: str, agent: str, req_model: str, resp_model: str,
+                            input_tokens: int, output_tokens: int,
+                            timestamp_dt: datetime) -> list[dict]:
+    """[LLM-call payload without identity, agent-invocation payload with user.name]."""
     trace_id = secrets.token_hex(16)
-    span_id = secrets.token_hex(8)
+    root_id = secrets.token_hex(8)
     start_ns = int(timestamp_dt.timestamp() * 1e9)
-    latency_ms = random.randint(1200, 4800)
-    end_ns = start_ns + int(latency_ms * 1e6)
+    end_ns = start_ns + int(random.randint(1200, 4800) * 1e6)
 
-    return {
-        "resourceSpans": [
-            {
-                "resource": {
-                    "attributes": [
-                        _attribute("service.name", "copilot-chat"),
-                        _attribute("user.name", user),
-                    ]
-                },
-                "scopeSpans": [
-                    {
-                        "spans": [
-                            {
-                                "traceId": trace_id,
-                                "spanId": span_id,
-                                "startTimeUnixNano": str(start_ns),
-                                "endTimeUnixNano": str(end_ns),
-                                "attributes": [
-                                    _attribute("gen_ai.operation.name", "chat"),
-                                    _attribute("gen_ai.agent.name", agent),
-                                    _attribute("gen_ai.request.model", req_model),
-                                    _attribute("gen_ai.response.model", resp_model),
-                                    _attribute("gen_ai.usage.input_tokens", input_tokens),
-                                    _attribute("gen_ai.usage.output_tokens", output_tokens),
-                                ],
-                            }
-                        ]
-                    }
-                ],
-            }
-        ]
+    def payload(span: dict) -> dict:
+        return {"resourceSpans": [{
+            "resource": {"attributes": [_attribute("service.name", "copilot-chat")]},
+            "scopeSpans": [{"spans": [span]}],
+        }]}
+
+    call = {
+        "traceId": trace_id, "spanId": secrets.token_hex(8), "parentSpanId": root_id,
+        "startTimeUnixNano": str(start_ns), "endTimeUnixNano": str(end_ns),
+        "attributes": [
+            _attribute("gen_ai.operation.name", "chat"),
+            _attribute("gen_ai.agent.name", agent),
+            _attribute("gen_ai.request.model", req_model),
+            _attribute("gen_ai.response.model", resp_model),
+            _attribute("gen_ai.usage.input_tokens", input_tokens),
+            _attribute("gen_ai.usage.output_tokens", output_tokens),
+        ],
     }
+    invocation = {
+        "traceId": trace_id, "spanId": root_id,
+        "startTimeUnixNano": str(start_ns), "endTimeUnixNano": str(end_ns + 1_000_000),
+        "attributes": [
+            _attribute("gen_ai.operation.name", "invoke_agent"),
+            _attribute("gen_ai.agent.name", agent),
+            _attribute("user.name", user),
+        ],
+    }
+    return [payload(call), payload(invocation)]
 
 
 def build_scaled_historical_batches(
@@ -146,7 +148,7 @@ def build_scaled_historical_batches(
             second = random.randint(0, 59)
             call_dt = datetime(2026, 10, day_date, hour, minute, second, tzinfo=timezone.utc)
 
-            payload = generate_trace_payload(
+            payloads = generate_trace_payloads(
                 user=user,
                 agent=agent,
                 req_model=req_model,
@@ -155,7 +157,7 @@ def build_scaled_historical_batches(
                 output_tokens=out,
                 timestamp_dt=call_dt,
             )
-            batches.append(payload)
+            batches.extend(payloads)
 
         daily_plan[date_str] = accumulated_tokens
 
@@ -166,13 +168,8 @@ def main():
     parser = argparse.ArgumentParser(description="Seed 10M-40M tokens/day historical Copilot usage.")
     parser.add_argument(
         "--endpoint",
-        default=os.getenv("OTLP_ENDPOINT", "https://otel-data-h3f2g0fqgrc4e6bn.westindia-01.azurewebsites.net"),
-        help="Target endpoint base URL (default: Azure App Service URL or OTLP_ENDPOINT env)",
-    )
-    parser.add_argument(
-        "--direct",
-        action="store_true",
-        help="Directly write events into data/ without HTTP.",
+        default=os.getenv("OTLP_ENDPOINT", "http://127.0.0.1:4318"),
+        help="Receiver base URL (default: local, or OTLP_ENDPOINT env)",
     )
     parser.add_argument(
         "--days",
@@ -205,17 +202,6 @@ def main():
         print(f"  {date_str}: {tokens:,} tokens (~{tokens / 1e6:.1f}M)")
 
     print(f"\nTotal batches to push: {len(batches)}")
-
-    if args.direct:
-        price_book = PriceBook()
-        store = UsageStore("data")
-        total_added = 0
-        for payload in batches:
-            events = parse_spans(payload, price_book)
-            added = store.add_events(events)
-            total_added += added
-        print(f"Successfully wrote {total_added} events directly to data/events.jsonl and data/daily_usage.csv!")
-        return
 
     # HTTP Push mode
     endpoint = args.endpoint.rstrip("/")

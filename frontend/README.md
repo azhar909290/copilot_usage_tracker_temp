@@ -58,7 +58,7 @@ The dashboard requests these endpoints directly from the browser:
 - `GET /api/v1/github/metrics` returns GitHub organization and per-user usage
   reports without a dashboard login.
 
-Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls include an `X-Request-ID` response header, also logged by the receiver.
+Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls include an `X-Request-ID` response header.
 
 ## Dashboard
 
