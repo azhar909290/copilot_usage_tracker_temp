@@ -232,7 +232,7 @@ export default function GitHubMetricsPage() {
 
   return <main className="app-shell github-shell">
     <aside className="sidebar">
-      <Link className="brand" href="/"><span className="brand-mark"><Command size={19} /></span><span className="brand-copy"><strong>Agent Command</strong><small>CENTER</small></span></Link>
+      <Link className="brand" href="/"><span className="brand-mark"><Command size={19} /></span><span className="brand-copy"><strong>AI Control</strong><small>PLANE</small></span></Link>
       <div className="workspace-label">ORGANIZATION</div>
       <div className="workspace-switcher"><span className="workspace-avatar"><GitBranch size={18} /></span><span className="workspace-name"><strong>{data?.organization ?? "GitHub organization"}</strong><small>Copilot REST metrics</small></span></div>
       <div className="nav-label">ANALYTICS</div>

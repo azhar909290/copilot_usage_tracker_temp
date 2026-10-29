@@ -62,7 +62,15 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 ## Dashboard
 
-The overview includes usage totals, token trends, model mix, and agent activity.
+The **AI Control Plane** overview includes agent calls, total tokens, active
+agents, active users, models used, token trends, model mix, and agent activity.
+Token consumption spans the full content width. Distribution (Model mix) sits
+beside the Daily Pulse activity calendar below it, stacking on smaller screens.
+Active agents counts distinct named agents with recorded calls in the current
+date range and filters, including the selected user; blank and `unknown` names
+are excluded. This is usage in the selected window, not real-time agent status.
+The Daily Pulse activity calendar keeps its call summary and legend next to the
+calendar, wrapping on narrow screens instead of leaving a large horizontal gap.
 The dashboard also supports auto-refresh and usage CSV export.
 
 ### Agent catalogue

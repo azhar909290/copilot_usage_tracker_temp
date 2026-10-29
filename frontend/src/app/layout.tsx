@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Agent Command Center | Copilot Usage",
+  title: "AI Control Plane | Copilot Usage",
   description: "Copilot usage, agent activity, and model cost analytics.",
 };
 

@@ -172,7 +172,7 @@ function getCsvValue(value: string | number | null | undefined) {
 }
 
 const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: "overview", label: "Command Center", icon: LayoutDashboard },
+  { id: "overview", label: "AI Control Plane", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
   { id: "agents", label: "Catalog", icon: Boxes },
   { id: "models", label: "Models", icon: Cpu },
@@ -358,6 +358,12 @@ export default function Home() {
       .map((row) => row.user)
       .filter((user) => user.trim().toLowerCase() !== "unknown"),
   ).size;
+  const activeAgents = new Set(
+    filteredRows
+      .filter((row) => row.requests > 0)
+      .map((row) => row.agent.trim())
+      .filter((agent) => agent && agent.toLowerCase() !== "unknown"),
+  ).size;
   const modelsUsed = new Set(filteredRows.map((row) => row.model)).size;
   const liveUsers = getLiveUsers(callEvents, now);
 
@@ -485,7 +491,7 @@ export default function Home() {
       <aside className="sidebar">
         <a className="brand" href="#overview" onClick={() => setView("overview")}>
           <span className="brand-mark"><Command size={19} strokeWidth={2.4} /></span>
-          <span className="brand-copy"><strong>Agent Command</strong><small>CENTER</small></span>
+          <span className="brand-copy"><strong>AI Control</strong><small>PLANE</small></span>
         </a>
 
         <div className="workspace-label">WORKSPACE</div>
@@ -651,6 +657,13 @@ export default function Home() {
                   <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
                 </article>
                 <article className="metric-card">
+                  <div className="metric-label">ACTIVE AGENTS <Bot size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCount(activeAgents)}</div>
+                  <div className="metric-foot">
+                    <span className="metric-mark purple-mark" /> {selectedUser === "all" ? "Distinct agents in current results" : `Agents used by ${selectedUser}`}
+                  </div>
+                </article>
+                <article className="metric-card">
                   <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
                   <div className="metric-value">{loading ? "—" : formatCount(activeUsers)}</div>
                   <div className="metric-foot">Known users in the current results</div>
@@ -662,7 +675,7 @@ export default function Home() {
                 </article>
               </section>
 
-              <section className="overview-grid">
+              <section className="token-consumption-section">
                 <article className="panel trend-panel">
                   <div className="panel-heading">
                     <div><div className="section-kicker">ACTIVITY</div><h2>Token consumption</h2></div>
@@ -688,7 +701,10 @@ export default function Home() {
                   ) : <EmptyState loading={loading} label="No token activity in this date range." />}
                   <div className="chart-bottomline"><span><i className="dot-blue" /> {formatCount(totals.input)} input tokens</span><span><i className="dot-coral" /> {formatCount(totals.output)} output tokens</span><span className="chart-period">{period}-DAY WINDOW</span></div>
                 </article>
+              </section>
 
+              <section className="overview-grid">
+                <UsageHeatmap rows={filteredRows} period={period} endDate={updatedAt?.toISOString().slice(0, 10) ?? null} onSelect={(date) => { setSearch(date); setView("activity"); }} />
                 <article className="panel model-panel">
                   <div className="panel-heading"><div><div className="section-kicker">DISTRIBUTION</div><h2>Model mix</h2></div><button className="text-link" onClick={() => setView("models")} type="button">View all <ArrowUpRight size={13} /></button></div>
                   {modelRows.length ? (
@@ -705,7 +721,6 @@ export default function Home() {
                 </article>
               </section>
 
-              <UsageHeatmap rows={filteredRows} period={period} endDate={updatedAt?.toISOString().slice(0, 10) ?? null} onSelect={(date) => { setSearch(date); setView("activity"); }} />
               <section className="panel bottom-panel">
                 <div className="panel-heading bottom-panel-heading">
                   <div><div className="section-kicker">WORKLOAD</div><h2>Agent activity</h2></div>
@@ -795,7 +810,17 @@ export default function Home() {
   );
 }
 
-function UsageHeatmap({ rows, period, endDate, onSelect }: { rows: UsageRow[]; period: Period; endDate: string | null; onSelect: (date: string) => void }) {
+function UsageHeatmap({
+  rows,
+  period,
+  endDate,
+  onSelect,
+}: {
+  rows: UsageRow[];
+  period: Period;
+  endDate: string | null;
+  onSelect: (date: string) => void;
+}) {
   if (!endDate) return null;
   const end = Date.parse(`${endDate}T00:00:00Z`);
   const counts = new Map<string, number>();
@@ -807,10 +832,55 @@ function UsageHeatmap({ rows, period, endDate, onSelect }: { rows: UsageRow[]; p
     if (index < offset) return <span className="heatmap-spacer" key={`spacer-${index}`} />;
     const date = new Date(start + (index - offset) * 86_400_000).toISOString().slice(0, 10);
     const count = counts.get(date) || 0;
-    const level = count ? Math.max(1, Math.ceil(count / maximum * 4)) : 0;
-    return <button className={`heatmap-cell level-${level}`} key={date} type="button" title={`${date}: ${formatCount(count)} calls`} aria-label={`${date}: ${formatCount(count)} calls`} onClick={() => onSelect(date)} />;
+    const level = count ? Math.max(1, Math.ceil((count / maximum) * 4)) : 0;
+    return (
+      <button
+        className={`heatmap-cell level-${level}`}
+        key={date}
+        type="button"
+        title={`${date}: ${formatCount(count)} calls`}
+        aria-label={`${date}: ${formatCount(count)} calls`}
+        onClick={() => onSelect(date)}
+      />
+    );
   });
-  return <section className="heatmap-section"><div className="panel-heading"><div><div className="section-kicker">DAILY PULSE</div><h2>Activity calendar</h2></div><span className="inventory-count">{counts.size} ACTIVE DAYS</span></div><div className="heatmap-layout"><div className="heatmap-day-labels"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div className="heatmap-grid">{cells}</div><div className="heatmap-summary"><strong>{formatCount(rows.reduce((total, row) => total + row.requests, 0))}</strong><span>calls / {period} days</span><div className="heatmap-legend"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell level-${level}`} />)}<span>More</span></div></div></div></section>;
+
+  return (
+    <section className="heatmap-section">
+      <div className="panel-heading">
+        <div>
+          <div className="section-kicker">DAILY PULSE</div>
+          <h2>Activity calendar</h2>
+        </div>
+        <span className="inventory-count">{counts.size} ACTIVE DAYS</span>
+      </div>
+      <div className="heatmap-layout">
+        <div className="heatmap-calendar-wrap">
+          <div className="heatmap-day-labels">
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+          <div className="heatmap-grid">{cells}</div>
+        </div>
+        <div className="heatmap-summary">
+          <strong>{formatCount(rows.reduce((total, row) => total + row.requests, 0))}</strong>
+          <span>calls / {period} days</span>
+          <div className="heatmap-legend">
+            <span>Less</span>
+            {[0, 1, 2, 3, 4].map((level) => (
+              <i key={level} className={`heatmap-cell level-${level}`} />
+            ))}
+            <span>More</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function EmptyState({ loading, label }: { loading: boolean; label: string }) {
