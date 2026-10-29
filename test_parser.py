@@ -398,6 +398,23 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(e3[0]["user"], "ChandruM56")
 
     def test_user_mapping_canonicalizes_aliases_and_emp_ids(self):
+        for employee_id, canonical in [
+            ("2862531", "Ashik1598753"),
+            ("2584949", "Skamalesh16"),
+            ("2814343", "parth-bisht-tcs"),
+        ]:
+            with self.subTest(employee_id=employee_id):
+                payload = {
+                    "resourceSpans": [{
+                        "resource": {"attributes": [attribute("process.user.name", employee_id)]},
+                        "scopeSpans": [{"spans": [{
+                            "traceId": f"t-{employee_id}", "spanId": "s-1",
+                            "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+                        }]}],
+                    }]
+                }
+                self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], canonical)
+
         # 125191 -> san-bha
         p1 = {
             "resourceSpans": [{

@@ -73,6 +73,9 @@ DEFAULT_USER_MAPPINGS = {
     "azharudeens": "azhar909290",
     "chandru": "ChandruM56",
     "2869784": "Hariharan07082002",
+    "2862531": "Ashik1598753",
+    "2584949": "Skamalesh16",
+    "2814343": "parth-bisht-tcs",
     "rajasekars": "rajasekar1809",
     "125191": "san-bha",
     "kvssseshadrisastry": "seshadrisastrykvss",
@@ -148,4 +151,3 @@ def normalize_user(raw_user: str | None) -> str | None:
 
     # Return mapped canonical name if recognized, else preserve original string
     return _LOOKUP_MAP.get(lower_val, val)
-
