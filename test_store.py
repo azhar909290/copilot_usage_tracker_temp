@@ -120,6 +120,28 @@ class UsageStoreTests(unittest.TestCase):
             reloaded = UsageStore(directory)
             self.assertEqual(len(reloaded.get_events()), 2)
 
+    def test_store_normalizes_aliases_and_merges_duplicates_on_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UsageStore(directory)
+            # Both 125191 and san-bha refer to the same user
+            e1 = event("call-emp", "125191", 100)
+            e2 = event("call-git", "san-bha", 200)
+            store.add_events([e1, e2])
+
+            summary = store.summary()
+            # Must merge into a single row under "san-bha"
+            self.assertEqual(len(summary), 1)
+            self.assertEqual(summary[0]["user"], "san-bha")
+            self.assertEqual(summary[0]["requests"], 2)
+            self.assertEqual(summary[0]["input_tokens"], 300)
+
+            # Check that replaying from events.jsonl also consolidates
+            reloaded = UsageStore(directory)
+            rel_summary = reloaded.summary()
+            self.assertEqual(len(rel_summary), 1)
+            self.assertEqual(rel_summary[0]["user"], "san-bha")
+            self.assertEqual(rel_summary[0]["requests"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

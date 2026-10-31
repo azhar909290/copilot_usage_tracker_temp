@@ -6,6 +6,9 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+from user_mapping import normalize_user, FILE_EXTENSION_PATTERN
+from teams import DemoTeams
+
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
     "requests", "input_tokens", "output_tokens", "total_tokens", "cost", "unpriced_requests",
@@ -26,10 +29,21 @@ class UsageStore:
         self._seen: set[str] = set()
         self._daily: dict[tuple, dict] = {}
         self._events: list[dict] = []
+        self._teams = DemoTeams(self.dir / "team_assignments.json")
         self._replay()
 
     def _accumulate(self, e: dict) -> None:
-        k = (e["date"], e["user"], e["agent"], e["model"])
+        raw_user = e.get("user")
+        normalized = normalize_user(raw_user)
+        if normalized:
+            user = normalized
+        elif raw_user and not FILE_EXTENSION_PATTERN.search(str(raw_user)):
+            user = str(raw_user).strip()
+        else:
+            user = "unknown"
+        e["user"] = user
+
+        k = (e["date"], user, e["agent"], e["model"])
         r = self._daily.setdefault(
             k,
             dict(requests=0, input_tokens=0, output_tokens=0, total_tokens=0,
@@ -67,6 +81,7 @@ class UsageStore:
                 self._seen.add(e["key"])
                 self._accumulate(e)
                 self._events.append(e)
+        self._flush_csv()
 
     def _write_csv(self, path: Path, fields: list[str], rows: list[dict]) -> None:
         tmp = path.with_suffix(".tmp")
@@ -83,6 +98,9 @@ class UsageStore:
                 return 0
             with open(self.events_path, "a", encoding="utf-8") as f:
                 for e in new:
+                    norm = normalize_user(e.get("user"))
+                    if norm:
+                        e["user"] = norm
                     f.write(json.dumps(e) + "\n")
                     self._seen.add(e["key"])
                     self._accumulate(e)
@@ -93,6 +111,7 @@ class UsageStore:
     def delete_user(self, username: str) -> int:
         with self._lock:
             if not self.events_path.exists():
+                self._teams.remove_user(username)
                 return 0
 
             retained_lines = []
@@ -106,6 +125,7 @@ class UsageStore:
                         retained_lines.append(line)
 
             if not deleted:
+                self._teams.remove_user(username)
                 return 0
 
             temp_path = self.events_path.with_suffix(".tmp")
@@ -118,6 +138,7 @@ class UsageStore:
             self._events.clear()
             self._replay()
             self._flush_csv()
+            self._teams.remove_user(username)
             return deleted
 
     def _flush_csv(self) -> None:
@@ -152,3 +173,8 @@ class UsageStore:
             if limit and limit > 0:
                 return self._events[-limit:]
             return list(self._events)
+
+    def get_teams(self) -> dict:
+        with self._lock:
+            users = sorted({user for _, user, _, _ in self._daily})
+            return self._teams.for_users(users)

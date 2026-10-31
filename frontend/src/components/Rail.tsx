@@ -57,7 +57,7 @@ export function Rail({
 }) {
   return (
     <nav className="rail" aria-label="Primary">
-      <Link className="rail-brand" href="/" aria-label="Agent Command Center, overview">
+      <Link className="rail-brand" href="/" aria-label="AI Control Plane home">
         <RidgeMark size={24} />
       </Link>
       <ul className="rail-items">

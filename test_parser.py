@@ -354,7 +354,7 @@ class ParserTests(unittest.TestCase):
             }],
         }
         e1 = parse_spans(chat_turn, PriceBook())
-        self.assertEqual(e1[0]["user"], "chandru")
+        self.assertEqual(e1[0]["user"], "ChandruM56")
 
         # Turn 2: Background gpt-6-luna indexing call in the same VS Code session
         # Has no user, no prompt, no path attributes
@@ -374,8 +374,8 @@ class ParserTests(unittest.TestCase):
             }],
         }
         e2 = parse_spans(indexing_turn, PriceBook())
-        # Inherits "chandru" from the session!
-        self.assertEqual(e2[0]["user"], "chandru")
+        # Inherits canonical user from the session!
+        self.assertEqual(e2[0]["user"], "ChandruM56")
 
         # Turn 3: thinkingTitle call in the same session
         title_turn = {
@@ -394,8 +394,78 @@ class ParserTests(unittest.TestCase):
             }],
         }
         e3 = parse_spans(title_turn, PriceBook())
-        # Inherits "chandru" from the session!
-        self.assertEqual(e3[0]["user"], "chandru")
+        # Inherits canonical user from the session!
+        self.assertEqual(e3[0]["user"], "ChandruM56")
+
+    def test_user_mapping_canonicalizes_aliases_and_emp_ids(self):
+        for employee_id, canonical in [
+            ("2862531", "Ashik1598753"),
+            ("2584949", "Skamalesh16"),
+            ("2814343", "parth-bisht-tcs"),
+        ]:
+            with self.subTest(employee_id=employee_id):
+                payload = {
+                    "resourceSpans": [{
+                        "resource": {"attributes": [attribute("process.user.name", employee_id)]},
+                        "scopeSpans": [{"spans": [{
+                            "traceId": f"t-{employee_id}", "spanId": "s-1",
+                            "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+                        }]}],
+                    }]
+                }
+                self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], canonical)
+
+        # 125191 -> san-bha
+        p1 = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("process.user.name", "125191")]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "t-125191", "spanId": "s-1",
+                    "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+                }]}],
+            }]
+        }
+        self.assertEqual(parse_spans(p1, PriceBook())[0]["user"], "san-bha")
+
+        # SaiManiYaswanthRejet -> Yaswanth77545
+        p2 = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("user.name", "SaiManiYaswanthRejet")]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "t-yas", "spanId": "s-2",
+                    "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+                }]}],
+            }]
+        }
+        self.assertEqual(parse_spans(p2, PriceBook())[0]["user"], "Yaswanth77545")
+
+        # kvssseshadrisastry -> seshadrisastrykvss
+        p3 = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("process.user.name", "kvssseshadrisastry")]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "t-sesh", "spanId": "s-3",
+                    "attributes": [attribute("gen_ai.usage.input_tokens", 50)],
+                }]}],
+            }]
+        }
+        self.assertEqual(parse_spans(p3, PriceBook())[0]["user"], "seshadrisastrykvss")
+
+    def test_file_names_like_homepage_tsx_are_never_parsed_as_users(self):
+        payload = {
+            "resourceSpans": [{
+                "resource": {"attributes": [attribute("service.name", "copilot")]},
+                "scopeSpans": [{"spans": [{
+                    "traceId": "t-tsx", "spanId": "s-4",
+                    "attributes": [
+                        attribute("copilot_chat.user_request", "Please fix /Users/HomePage.tsx"),
+                        attribute("gen_ai.usage.input_tokens", 50),
+                    ],
+                }]}],
+            }]
+        }
+        # HomePage.tsx must not be extracted as the user; falls back to unknown
+        self.assertEqual(parse_spans(payload, PriceBook())[0]["user"], "unknown")
 
     def test_path_user_rejects_single_letter_false_positives(self):
         payload = {

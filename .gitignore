@@ -21,6 +21,7 @@ data/events.jsonl
 data/daily_usage.csv
 data/daily_totals.csv
 data/marketplace_cache.json
+data/team_assignments.json
 
 .DS_Store
 Thumbs.db

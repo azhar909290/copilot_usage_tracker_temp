@@ -11,7 +11,7 @@ const DURATION = 1100;
 /** Screen gutters (px) kept free for the HTML day labels on the left and time labels below. */
 const GUTTER = { left: 62, right: 26, top: 10, bottom: 30 };
 
-export type RidgeColors = { surface: string; ink: string; accent: string };
+export type RidgeColors = { surface: string; ink: string; front: string; accent: string };
 
 export type RidgeSceneProps = {
   rows: number[][];
@@ -226,14 +226,15 @@ function Ridges({
 
   useEffect(() => {
     const ink = new THREE.Color(colors.ink);
+    const front = new THREE.Color(colors.front);
     const accent = new THREE.Color(colors.accent);
     scene.curtainMaterial.color.set(colors.surface);
     scene.ridges.forEach((ridge, row) => {
       const material = ridge.line.material as THREE.LineBasicMaterial;
       const near = count > 1 ? row / (count - 1) : 1;
-      const resting = 0.2 + 0.74 * Math.pow(near, 1.25);
+      const resting = 0.3 + 0.7 * Math.pow(near, 1.1);
       const isAccent = highlight !== null ? row === highlight : row === accentRow;
-      material.color.copy(isAccent ? accent : ink);
+      material.color.copy(isAccent ? accent : ink.clone().lerp(front, Math.pow(near, 0.8)));
       material.opacity = isAccent ? 1 : highlight !== null ? resting * 0.42 : resting;
     });
     invalidate();

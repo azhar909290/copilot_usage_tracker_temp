@@ -5,6 +5,8 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from user_mapping import normalize_user, IGNORED_USERS
+
 DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "UTC"))
 # Spans that only roll up their children's tokens would double count.
 SKIP_OPERATIONS = set(
@@ -29,20 +31,6 @@ PATH_USER_PATTERN = re.compile(
 PROMPT_USER_PATTERN = re.compile(
     r'([a-zA-Z0-9._-]+)@[a-zA-Z0-9._-]+(?:\s*[%$#>]|:)'
 )
-IGNORED_USERS = {
-    "root",
-    "daemon",
-    "nobody",
-    "runner",
-    "system",
-    "administrator",
-    "admin",
-    "service",
-    "public",
-    "default",
-    "shared",
-    "local-os-user",
-}
 
 SESSION_ATTR_KEYS = (
     "gen_ai.conversation.id",
@@ -78,7 +66,9 @@ def _extract_user(a: dict) -> str | None:
     for k in USER_ATTR_KEYS:
         val = a.get(k)
         if val is not None and str(val).strip():
-            return str(val).strip()
+            u = normalize_user(str(val))
+            if u:
+                return u
     return None
 
 
@@ -87,9 +77,9 @@ def _extract_os_user(a: dict) -> str | None:
         return None
     val = a.get("process.user.name")
     if val is not None and str(val).strip():
-        s = str(val).strip()
-        if len(s) >= 3 and s.lower() not in IGNORED_USERS:
-            return s
+        u = normalize_user(str(val))
+        if u and len(u) >= 2:
+            return u
     return None
 
 
@@ -102,13 +92,13 @@ def _extract_path_user(a: dict) -> str | None:
             continue
         m = PATH_USER_PATTERN.search(val)
         if m:
-            u = m.group(1).strip()
-            if len(u) >= 3 and u.lower() not in IGNORED_USERS:
+            u = normalize_user(m.group(1))
+            if u and len(u) >= 3:
                 return u
         m2 = PROMPT_USER_PATTERN.search(val)
         if m2:
-            u = m2.group(1).strip()
-            if len(u) >= 3 and u.lower() not in IGNORED_USERS:
+            u = normalize_user(m2.group(1))
+            if u and len(u) >= 3:
                 return u
     return None
 
@@ -270,7 +260,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                     f"{trace_id}:{span_id}", (None, None)
                 )
                 if u:
-                    return u
+                    return normalize_user(u) or u
                 if not parent_id:
                     break
                 span_id = parent_id
@@ -283,19 +273,20 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 or path_user
             )
             if inherited_span:
-                return inherited_span
+                return normalize_user(inherited_span) or inherited_span
 
             # 3. Resource user
             if resource_user != "unknown":
-                return str(resource_user)
+                return normalize_user(resource_user) or str(resource_user)
 
             # 4. Inherited RESOURCE_TIER (trace, span_session, or res_session)
-            return (
+            fallback = (
                 _cached_user(_TRACE_USER_CACHE, trace_id, RESOURCE_TIER)
                 or _cached_user(_SESSION_USER_CACHE, span_session, RESOURCE_TIER)
                 or _cached_user(_SESSION_USER_CACHE, res_session, RESOURCE_TIER)
                 or "unknown"
             )
+            return normalize_user(fallback) or fallback
 
         # 2) build events from spans that carry token usage
         for s in spans:

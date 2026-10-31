@@ -32,13 +32,19 @@ export type CallEvent = {
 export type CatalogAgent = {
   id: string;
   name: string;
+  display_name?: string;
   description: string;
+  argument_hint?: string;
   plugin_id: string;
   plugin_name: string;
   version: string;
+  status?: string;
   path: string;
+  url?: string;
   kind?: "agent" | "skill_package";
   skills?: string[];
+  has_definition?: boolean;
+  catalogue?: string | null;
 };
 
 export type CatalogResponse = {

@@ -23,6 +23,7 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
 import { Rail } from "@/components/Rail";
 import { RidgeMark } from "@/components/RidgeMark";
 import { SignalLines } from "@/components/SignalLines";
+import { seriesColor } from "@/components/DataViews";
 import { personHues } from "@/lib/usage";
 import { useDashboardTheme } from "../theme";
 
@@ -122,7 +123,6 @@ const tooltipStyle = {
   labelStyle: { color: "var(--muted)", marginBottom: 2 },
 };
 // Neutral ramp for the model ring: one ink, stepped by opacity in the order shown.
-const rampOpacity = (index: number) => Math.max(0.14, 1 - index * 0.17);
 
 function BreakdownTable({ rows, dimension }: { rows: Breakdown[]; dimension: "Model" | "Feature" }) {
   return <div className="table-frame"><table className="table">
@@ -139,15 +139,15 @@ function ModelUsageChart({ rows, metric }: { rows: Breakdown[]; metric: ModelMet
   const metricLabel = sortOptions.find((option) => option.key === metric)?.label;
   if (!rows.length) return <p className="empty">No models match the current filters.</p>;
   const total = rows.reduce((sum, row) => sum + row[metric], 0);
-  const chartRows = rows.map((row, index) => ({ ...row, opacity: rampOpacity(index) }));
+  const chartRows = rows.map((row, index) => ({ ...row, color: seriesColor(index) }));
   const share = (value: number) => `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(total ? value / total * 100 : 0)}%`;
   return <section className="ring-layout" aria-label={`Model usage ring chart: ${metricLabel}`}>
     <div className="ring">
       {total > 0 ? <>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={chartRows.filter((row) => row[metric] > 0)} dataKey={metric} nameKey="name" innerRadius={98} outerRadius={108} paddingAngle={0.6} stroke="var(--surface)" strokeWidth={1} isAnimationActive={false}>
-              {chartRows.filter((row) => row[metric] > 0).map((row) => <Cell key={row.name} fill="var(--chart-ink)" fillOpacity={row.opacity} />)}
+            <Pie data={chartRows.filter((row) => row[metric] > 0)} dataKey={metric} nameKey="name" innerRadius={92} outerRadius={108} paddingAngle={1.2} cornerRadius={3} stroke="var(--surface)" strokeWidth={1} animationDuration={1100} animationEasing="ease-out">
+              {chartRows.filter((row) => row[metric] > 0).map((row) => <Cell key={row.name} fill={row.color} />)}
             </Pie>
             <Tooltip {...tooltipStyle} formatter={(value) => {
               const amount = Number(value);
@@ -160,7 +160,7 @@ function ModelUsageChart({ rows, metric }: { rows: Breakdown[]; metric: ModelMet
     </div>
     <ul className="legend-table" aria-label="Model usage values and percentages">
       {chartRows.map((row) => <li key={row.name}>
-        <span className="legend-swatch" style={{ background: "var(--chart-ink)", opacity: row.opacity }} aria-hidden="true" />
+        <span className="legend-swatch" style={{ background: row.color, boxShadow: `0 0 8px ${row.color}` }} aria-hidden="true" />
         <span className="legend-name" title={row.name}>{row.name}</span>
         <span className="num">{count(row[metric])}</span><span className="num muted">{share(row[metric])}</span>
       </li>)}
@@ -255,11 +255,11 @@ export default function GitHubMetricsPage() {
     { label: "Lines added", value: org?.totals.loc_added_sum, note: "Accepted code and agent/editor additions" },
   ] : [];
 
-  return <div className="app">
+  return <><div className="sky" aria-hidden="true"><i /></div><div className="app">
     <Rail
       active="github"
       items={[
-        { id: "overview", label: "Telemetry overview", short: "Overview", icon: LayoutGrid, href: "/" },
+        { id: "overview", label: "Telemetry overview", short: "Overview", icon: LayoutGrid, href: "/dashboard" },
         { id: "github", label: "GitHub metrics", short: "GitHub", icon: GitBranch, href: "/github-metrics" },
       ]}
       utilities={[
@@ -270,7 +270,7 @@ export default function GitHubMetricsPage() {
     <main className="canvas">
       <div className="mobile-bar">
         <RidgeMark size={22} />
-        <strong>Agent Command Center</strong>
+        <strong>AI Control Plane</strong>
         <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>{theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}</button>
       </div>
       <header className="title-row">
@@ -327,11 +327,15 @@ export default function GitHubMetricsPage() {
                   <CartesianGrid vertical={false} />
                   <XAxis dataKey="day" tickFormatter={(day: string) => dateLabel(day).replace(/, \d{4}$/, "")} axisLine={false} tickLine={false} minTickGap={28} />
                   <YAxis tickFormatter={short} axisLine={false} tickLine={false} width={44} />
-                  <Tooltip {...tooltipStyle} cursor={{ stroke: "var(--accent)", strokeWidth: 1 }} formatter={(value) => count(typeof value === "number" ? value : Number(value))} />
-                  <Area type="linear" dataKey="user_initiated_interaction_count" name="User prompts" stroke="var(--chart-ink)" strokeWidth={1.5} fill="var(--chart-ink)" fillOpacity={0.06} isAnimationActive={false} />
-                  <Area type="linear" dataKey="code_generation_activity_count" name="Code generations" stroke="var(--muted)" strokeWidth={1.5} fill="transparent" isAnimationActive={false} />
+                  <defs>
+                    <linearGradient id="gh-prompts" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--c-calls)" stopOpacity={0.45} /><stop offset="100%" stopColor="var(--c-calls)" stopOpacity={0} /></linearGradient>
+                    <linearGradient id="gh-generations" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--c-tokens)" stopOpacity={0.35} /><stop offset="100%" stopColor="var(--c-tokens)" stopOpacity={0} /></linearGradient>
+                  </defs>
+                  <Tooltip {...tooltipStyle} cursor={{ stroke: "var(--c-cost)", strokeWidth: 1 }} formatter={(value) => count(typeof value === "number" ? value : Number(value))} />
+                  <Area type="monotone" dataKey="user_initiated_interaction_count" name="User prompts" stroke="var(--c-calls)" strokeWidth={2} fill="url(#gh-prompts)" animationDuration={1200} animationEasing="ease-out" />
+                  <Area type="monotone" dataKey="code_generation_activity_count" name="Code generations" stroke="var(--c-tokens)" strokeWidth={2} fill="url(#gh-generations)" animationDuration={1200} animationEasing="ease-out" />
                 </AreaChart></ResponsiveContainer></div>
-                <div className="chart-legend"><span style={{ color: "var(--chart-ink)" }}><i />User prompts</span><span><i />Code generations</span></div>
+                <div className="chart-legend"><span style={{ color: "var(--c-calls)" }}><i />User prompts</span><span style={{ color: "var(--c-tokens)" }}><i />Code generations</span></div>
               </> : <p className="empty">Daily activity is unavailable or no activity was reported.</p>}
             </section>
             <section className="block">
@@ -389,5 +393,5 @@ export default function GitHubMetricsPage() {
       </div>}
       {data && <footer className="status-footer"><span>GitHub snapshot <span className="num">{new Date(data.fetched_at).toLocaleString()}</span> · server cache <span className="num">{data.cache_seconds / 60}</span> minutes</span><span>GitHub REST API · no OTLP data mixed in</span></footer>}
     </main>
-  </div>;
+  </div></>;
 }

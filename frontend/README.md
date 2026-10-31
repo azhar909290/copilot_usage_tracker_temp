@@ -1,4 +1,4 @@
-# Signal Usage Dashboard
+# AI Control Plane
 
 Next.js dashboard for the Copilot usage tracker. It reads the FastAPI service from the browser, so API calls are visible in DevTools Network.
 
@@ -52,30 +52,85 @@ Open [http://localhost:3000](http://localhost:3000). Set `NEXT_PUBLIC_USAGE_API_
 
 The dashboard requests these endpoints directly from the browser:
 
-- `GET /api/v1/usage` returns daily usage aggregates and currency.
-- `GET /api/v1/agents` returns marketplace agents and refresh status.
+- `GET /api/v1/usage` returns daily usage aggregates, currency, call events and
+  `teams` (the organization name, its team names and each member's saved team).
+- `GET /api/v1/agents` returns the AgentVerse DevJourney agent catalogue and refresh status.
 - `GET /api/v1/health` returns receiver health.
 - `GET /api/v1/github/metrics` returns GitHub organization and per-user usage
   reports without a dashboard login.
 
 Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls include an `X-Request-ID` response header, also logged by the receiver.
 
+## Landing page
+
+`/` introduces the AI Control Plane: a three.js hero (three stacked control
+planes for cost, tokens and calls, an AI core, and the catalogue's agents
+orbiting it with data streaming in), live figures from the receiver for the last
+30 days (active agents out of the catalogue, calls, teams and people, models),
+the four lenses of the product and how telemetry flows into it. The scene follows
+the pointer, pauses off screen, and falls back to a flat drawing without WebGL.
+
 ## Dashboard
 
-The overview answers "where is the team's Copilot usage going, and what does it cost?" for the selected range (7, 30 or 90 days):
+The dashboard lives at `/dashboard`; `/dashboard?view=users` (or `agents`,
+`models`, `activity`) opens a view directly. The overview answers "where is the team's Copilot usage going, and what does it cost?" for the selected range (7, 30 or 90 days):
 
-- **Title row**: the range, a freshness stamp, and the strongest finding in one sentence (for example, which model drove most of the estimated cost).
-- **KPI strip**: calls, tokens (in/out), estimated cost (with unpriced calls flagged), users (with how many are live), and median/p95 latency. Calls, Tokens and Est. cost double as the metric switch for the two charts below.
-- **Daily rhythm**: a three.js ridgeline, with one line per receiver day and the newest day (amber) in front. Each line is the smoothed density of the selected metric by UTC time of day (18-minute Gaussian kernel), so the area under a line equals that day's total. Hovering reads the exact 30-minute bin under the pointer; clicking opens that day in Activity. Browsers without WebGL get a flat SVG version of the same data.
-- **Per-day bars**: the same metric per day on a labelled scale, linked to the ridge (hovering either highlights the same day in both). Today's bar is amber; arrow keys and Enter work when the chart has focus.
+- **Title row**: the organization (`tth-cto-innovation`), the scope (all teams, one team or one user), the range, a freshness stamp, and the strongest finding in one sentence (for example, which model drove most of the estimated cost).
+- **KPI cards**: active agents (catalogue agents with calls, out of the catalogue total, plus any active agents outside it), calls (with people and live users), tokens (in/out), models used, and median/p95 latency, each with a drawn-in daily sparkline in its own hue. Calls and Tokens double as the metric switch for the two charts below. The headline sentence above the filters is the strongest usage finding, not a cost one.
+- **Daily rhythm**: a three.js ridgeline, with one line per receiver day and the newest day (bright ink) in front. Ridges shade by depth from a back hue to the selected metric's hue. Each line is the smoothed density of the selected metric by UTC time of day (18-minute Gaussian kernel), so the area under a line equals that day's total. Hovering reads the exact 30-minute bin under the pointer; clicking opens that day in Activity. Browsers without WebGL get a flat SVG version of the same data.
+- **Per-day bars**: the same metric per day on a labelled scale, linked to the ridge (hovering either highlights the same day in both). Bars grow in with a stagger in the metric's gradient and today's bar glows; arrow keys and Enter work when the chart has focus.
 - **Findings carousel**: plain-language facts computed from the filtered data (biggest cost driver, unpriced calls, peak half-hour, busiest agent, heaviest user, busiest day, slowest model, input/output ratio), each with an action that applies a filter or opens a view. Slide width and travel are computed in CSS viewport units; it autoplays every 7 seconds, pauses on hover, keyboard focus or the Pause button, supports drag/swipe and arrow keys, and never autoplays under reduced motion.
 - **Models and Agents** share lists (top five, row fill as the bar) and **Recent calls**.
 
-The Users, Catalog, Models and Activity views share the date, user, agent, model and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
+The Organization, Catalog, Models and Activity views share the date, team, user, agent, model and text filters. Selecting a team scopes every view to that team's members; on Organization it focuses the team instead, so the whole hierarchy stays visible. The dashboard also supports auto-refresh and CSV export; usage and activity exports include each person's team.
+
+### Organization
+
+The Organization view shows `tth-cto-innovation` as one organization with five
+teams: Data, AI, Cognitive core, Rapid labs and Innovation.
+
+- **Constellation**: a three.js scene with the organization at the core, one
+  planet per team on a shared orbit (sized by the team's token share) and one
+  badge per member circling their team: their initial ringed in the team colour,
+  sized by the member's tokens and dimmed when idle in the range. Drag to orbit; select a team (in the scene, the team
+  list, a card or the donut) to fly the camera to it and focus the whole page.
+  Hovering the core, a team or a member shows its calls, tokens and cost. The
+  scene pauses when off screen; browsers without WebGL get a flat orbit diagram.
+- **Team cards**: tokens, share of the organization, a contribution bar per
+  member, calls, cost, active members and a daily sparkline.
+- **Team pulse**: daily calls stacked by team; hover a band to isolate it.
+- **Token share donut** and a **leaderboard** of the members with the most tokens.
+- **Members table**: every member with their team, live badge and usage.
+
+Team memberships come from the receiver (`DATA_DIR/team_assignments.json`). They
+are saved demo assignments, not HR records: new users are assigned to the
+smallest team at random and keep that team afterwards. Usage from people
+without a membership (for example `unknown`) appears as Unassigned. Set
+`TEAM_ORGANIZATION` on the receiver to change the organization name.
+
+### Catalog
+
+The Catalog view lists the AgentVerse DevJourney agents grouped into families,
+each with its own two-to-three hue signature: Development journey (A-DEV),
+Assurance & testing (A-ASR), Modernisation (B-MOD), Data & analytics (D-DATA),
+standalone agents, and telemetry-only agents seen in usage but not in the
+catalogue. Family cards filter the grid; tiles show calls, tokens, cost and a
+usage meter, and open a detail panel with the description, arguments,
+definition link, daily calls and the people who use the agent.
+
+### Models and Activity
+
+Models shows the token mix as an animated donut, average tokens per call and a
+sortable table. Activity shows a weekday × hour heat field in local time (hot
+hours shift from aurora to ember), the busiest agents, a **signal network** and
+the recorded calls. The signal network is a four-layer graph of the top teams,
+people, agents and models: link width follows call counts, signals travel each
+link at a pace set by its traffic, and hovering or focusing a node traces its
+path through every layer.
 
 Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> for the command menu (views, agents, users, models and actions with fuzzy search), or <kbd>/</kbd> to focus the filter search.
 
-On first load, a full-screen loader reports the real loading stages (interface, receiver, ledger, composing) with their measured durations, then wipes away as soon as the data is on screen. It is part of the static HTML, so it paints before JavaScript runs.
+On first load, a full-screen loader assembles three control planes (cost, tokens, calls) with a neural mesh lighting up on the top one, reveals the name, and reports the real loading stage (interface, receiver, ledger, composing) with a percentage meter, then lifts away as soon as the data is on screen. It is part of the static HTML and CSS-animated, so it paints and moves before JavaScript runs.
 
 The overview's live strip lists users whose most recent recorded model call
 started within the last 5 minutes, and the Users table highlights them with a
@@ -104,17 +159,33 @@ npm start
 
 ## Design and UI stack
 
-The visual system follows the [taste-skill](https://github.com/Leonxlnx/taste-skill) "Data terminal" app style: a near-black ground with cards a step darker, figures in IBM Plex Mono (tabular), text in Public Sans, and one accent (OpenTelemetry amber). Colour is reserved for data and selection: every selected item (nav, range, KPI, tab, sort column, carousel page) is marked by a 1px amber line as wide as its label. Light mode maps the same roles onto a neutral light palette. All tokens live at the top of `src/app/globals.css`.
+The visual system, "Aurora Observatory", was set with the
+[Impeccable](https://github.com/pbakaus/impeccable) colour and type guidance and
+[Emil Kowalski's](https://github.com/emilkowalski/skills) motion principles:
+
+- **Palette**: a deep ink ground with a triad that keeps one meaning everywhere:
+  aurora teal for calls, iris violet for tokens and ember coral for cost. Teams
+  take the triad plus rose, sun and lime; catalogue families pair two or three
+  of these hues. Light mode remaps the same roles. All tokens live at the top of
+  `src/app/globals.css`.
+- **Type**: Bricolage Grotesque for display headings and figures, Instrument
+  Sans for interface text with tabular numerals, and JetBrains Mono only for
+  agent identifiers and file paths.
+- **Motion**: strong ease-out curves for arrivals, short staggered entrances as
+  sections scroll into view, drawn-in sparklines and arcs, growing bars, springs
+  for selection, and press feedback on controls.
 
 | Library | Used for |
 | --- | --- |
-| `next/font` | Self-hosted Public Sans and IBM Plex Mono |
-| `three` + `@react-three/fiber` | The Daily rhythm ridgeline (loaded on demand, rendered only when something changes) |
-| `motion` | Selection-line transitions and view changes |
+| `next/font` | Self-hosted Bricolage Grotesque, Instrument Sans and JetBrains Mono |
+| `three` + `@react-three/fiber` | The landing hero, the Daily rhythm ridgeline and the Organization constellation (loaded on demand) |
+| `motion` | Entrances, drawn charts, the catalogue grid, the detail panel and view changes |
 | `cmdk` | The ⌘K command menu |
 | `@number-flow/react` | KPI figures that roll to new values on refresh |
 
-The interface respects `prefers-reduced-motion`: the loader, carousel, ridge rise and parallax become static. The rail folds into a bottom bar below 720px.
+The interface respects `prefers-reduced-motion`: travel, loops, orbits and the
+loader animation stop, while fades and colour changes that carry meaning remain.
+The rail folds into a bottom bar below 720px.
 
 If `npm run dev` shows outdated styles after pulling changes, stop the dev server, delete `.next/dev` and start it again.
 

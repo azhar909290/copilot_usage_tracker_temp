@@ -68,8 +68,16 @@ function subscribeTheme(onChange: () => void) {
 function readPalette() {
   const style = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  return [read("--surface", "#131217"), read("--chart-ink", "#f2f2f3"), read("--accent", "#f5a800")].join("|");
+  return [
+    read("--surface", "#0f1220"),
+    read("--c-calls", "#38e2c8"),
+    read("--c-tokens", "#a08bff"),
+    read("--c-cost", "#ff8f5e"),
+    read("--text", "#edf0ff"),
+  ].join("|");
 }
+
+const METRIC_DEPTH: Record<Metric, [number, number]> = { calls: [2, 1], tokens: [1, 2], cost: [2, 3] };
 
 export function SignalRidge({
   data,
@@ -96,9 +104,10 @@ export function SignalRidge({
   const palette = useSyncExternalStore(subscribeTheme, readPalette, () => "");
   const colors = useMemo<RidgeColors | null>(() => {
     if (!palette) return null;
-    const [surface, ink, accent] = palette.split("|");
-    return { surface, ink, accent };
-  }, [palette]);
+    const values = palette.split("|");
+    const [back, front] = METRIC_DEPTH[metric];
+    return { surface: values[0], ink: values[back], front: values[front], accent: values[4] };
+  }, [palette, metric]);
   const webgl = useSyncExternalStore<boolean | null>(noSubscription, supportsWebGL, () => null);
   const [pointer, setPointer] = useState<{ row: number; minute: number } | null>(null);
   const [nowMinute, setNowMinute] = useState<number | null>(null);

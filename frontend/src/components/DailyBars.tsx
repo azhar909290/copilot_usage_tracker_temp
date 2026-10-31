@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { displayDate, formatCompact, formatCount, formatMoney } from "@/lib/format";
 import type { Metric } from "@/lib/usage";
 
@@ -23,6 +24,12 @@ export function formatMetric(value: number, metric: Metric, currency: string, co
   if (compact || metric === "tokens") return value >= 10_000 ? formatCompact(value) : formatCount(value);
   return formatCount(value);
 }
+
+export const metricColor: Record<Metric, [string, string]> = {
+  calls: ["var(--c-calls)", "var(--c-tokens)"],
+  tokens: ["var(--c-tokens)", "var(--c-calls)"],
+  cost: ["var(--c-cost)", "var(--c-rose)"],
+};
 
 export const metricNoun: Record<Metric, string> = {
   calls: "calls",
@@ -48,6 +55,9 @@ export function DailyBars({
   onSelect: (date: string) => void;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
+  const gradientId = `bars-${useId().replace(/:/g, "")}`;
+  const reduced = useReducedMotion();
+  const [barTop, barBottom] = metricColor[metric];
   const [{ width, height: HEIGHT }, setSize] = useState({ width: 0, height: 250 });
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
 
@@ -110,6 +120,12 @@ export function DailyBars({
     >
       {width > 0 && (
         <svg width={width} height={HEIGHT} aria-hidden="true">
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style={{ stopColor: barTop, stopOpacity: 1 }} />
+              <stop offset="100%" style={{ stopColor: barBottom, stopOpacity: 0.35 }} />
+            </linearGradient>
+          </defs>
           {ticks.map((tick) => {
             const y = PAD.top + plotHeight - (tick / top) * plotHeight;
             return (
@@ -132,12 +148,19 @@ export function DailyBars({
             return (
               <g key={days[position]}>
                 {value > 0 && (
-                  <rect
-                    className={`bars-bar${isLatest ? " is-latest" : ""}${isHighlighted ? " is-highlighted" : ""}`}
+                  <motion.rect
+                    key={`${metric}-${days[0]}-${days.length}`}
+                    className={`bars-bar${isHighlighted ? " is-highlighted" : ""}${highlighted >= 0 && !isHighlighted ? " is-dim" : ""}`}
                     x={x}
                     y={y}
                     width={barWidth}
                     height={height}
+                    rx={Math.min(4, barWidth / 2)}
+                    fill={`url(#${gradientId})`}
+                    style={isLatest ? { filter: `drop-shadow(0 0 8px ${barTop})` } : undefined}
+                    initial={reduced ? false : { scaleY: 0, opacity: 0 }}
+                    animate={{ scaleY: 1, opacity: 1 }}
+                    transition={{ duration: 0.7, delay: reduced ? 0 : Math.min(position * 0.018, 0.6), ease: [0.23, 1, 0.32, 1] }}
                   />
                 )}
                 {isHighlighted && (
