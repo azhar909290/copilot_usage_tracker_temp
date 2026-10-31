@@ -66,12 +66,36 @@ The **AI Control Plane** overview includes agent calls, total tokens, active
 agents, active users, models used, token trends, model mix, and agent activity.
 Token consumption spans the full content width. Distribution (Model mix) sits
 beside the Daily Pulse activity calendar below it, stacking on smaller screens.
+The activity chart can also show daily calls as a line graph for the five
+named agents with the most calls in the selected date range and filters. The
+legend shows their actual names and call totals; other agents are not grouped
+into an "other" line. The total calls below the chart still covers all matching
+activity. Both chart modes share a dark, high-contrast signal-style display.
+Both graphs animate on selection with the same duration and easing, even when
+the browser requests reduced motion.
 Active agents counts distinct named agents with recorded calls in the current
 date range and filters, including the selected user; blank and `unknown` names
 are excluded. This is usage in the selected window, not real-time agent status.
 The Daily Pulse activity calendar keeps its call summary and legend next to the
 calendar, wrapping on narrow screens instead of leaving a large horizontal gap.
 The dashboard also supports auto-refresh and usage CSV export.
+
+### Demo team usage
+
+The **Users** page switches between user and team views. Observed users receive
+balanced random demo memberships in Data, AI, Cognitive core, Rapid labs, or
+Innovation. Assignments are saved to `DATA_DIR/team_assignments.json`, remain
+stable across refreshes and receiver restarts, and are not real organizational
+memberships. New people are assigned without moving existing members.
+Aliases use the same canonical identity as usage records. Unknown identities
+remain **Unassigned**, so their usage is not lost.
+
+Team cards show calls, input/output/total tokens, estimated cost, active users,
+and an expandable assigned-person roster. Date, user, agent, model, search, and
+team filters apply to usage metrics; the roster includes all saved members.
+Select **View users** on a team to drill into its user table. The user table and
+its CSV include a team column; the team-view CSV contains aggregated team usage.
+Deleting a user's usage also removes their saved demo membership.
 
 ### Agent catalogue
 

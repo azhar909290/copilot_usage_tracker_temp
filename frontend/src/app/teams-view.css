@@ -1,0 +1,25 @@
+.team-view-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.team-view-toggle { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.team-view-toggle button { border: 0; background: transparent; color: var(--muted); padding: 8px 14px; cursor: pointer; }
+.team-view-toggle button[aria-pressed="true"] { color: var(--ink); background: var(--surface-soft); box-shadow: inset 0 -2px var(--accent); }
+.team-demo-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.team-demo-note strong { color: var(--coral); }
+.team-usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.team-usage-card { min-width: 0; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--accent); border-radius: 8px; }
+.team-usage-card:nth-child(2n) { border-top-color: var(--blue); }
+.team-usage-card:nth-child(3n) { border-top-color: var(--green); }
+.team-usage-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.team-usage-heading h3 { margin: 0; color: var(--ink); font-size: 16px; }
+.team-usage-heading > span { color: var(--muted); font-size: 11px; }
+.team-usage-total { display: flex; flex-direction: column; gap: 4px; margin: 20px 0; }
+.team-usage-total strong { font: 24px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.team-usage-total span, .team-usage-metrics dt { color: var(--muted); font-size: 11px; }
+.team-usage-metrics { display: grid; gap: 10px; margin: 0 0 16px; }
+.team-usage-metrics > div { display: flex; justify-content: space-between; gap: 8px; }
+.team-usage-metrics dd { margin: 0; color: var(--ink); font: 12px var(--font-mono); }
+.team-usage-members { margin: 14px 0; color: var(--muted); font-size: 12px; }
+.team-usage-members summary { cursor: pointer; }
+.team-usage-members ul { display: grid; gap: 6px; padding-left: 18px; overflow-wrap: anywhere; }
+.team-usage-note { color: var(--muted); font-size: 12px; }
+@media (max-width: 1050px) { .team-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .team-usage-grid { grid-template-columns: minmax(0, 1fr); } }

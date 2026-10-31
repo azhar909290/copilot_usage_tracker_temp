@@ -1,0 +1,173 @@
+.activity-chart-panel.trend-panel {
+  --trend-grid: #23465a;
+  position: relative;
+  padding: 22px 24px 16px;
+  color: #e6f7ff;
+  background:
+    radial-gradient(ellipse at 85% 0%, #12405480, transparent 48%),
+    linear-gradient(135deg, #0b1c2d, #071421 72%);
+  border: 1px solid #24485b;
+  border-radius: 9px;
+  box-shadow: inset 0 1px 0 #75d7ec12, 0 12px 30px #020d1824;
+}
+
+.activity-chart-panel.trend-panel::before {
+  position: absolute;
+  top: -1px;
+  left: 24px;
+  width: 58px;
+  height: 2px;
+  background: #59dff5;
+  box-shadow: 0 0 12px #59dff5aa;
+  content: "";
+}
+
+.activity-chart-panel .section-kicker {
+  color: #72c6d6;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.activity-chart-panel .panel-heading h2 {
+  color: #f0faff;
+}
+
+.activity-chart-panel .agent-chart-caption {
+  margin-top: 5px;
+  color: #91b3c2;
+  font-size: 11px;
+}
+
+.activity-chart-panel .chart-controls {
+  gap: 12px 16px;
+}
+
+.activity-chart-panel .chart-toggle {
+  background: #071724;
+  border-color: #285164;
+}
+
+.activity-chart-panel .chart-toggle button {
+  padding: 7px 10px;
+  color: #a4c0cd;
+}
+
+.activity-chart-panel .chart-toggle button:hover {
+  color: #e8faff;
+}
+
+.activity-chart-panel .chart-toggle button.active {
+  color: #d7faff;
+  background: #123849;
+  box-shadow: inset 0 -2px 0 #59dff5;
+}
+
+.activity-chart-panel .chart-toggle button:focus-visible {
+  outline: 2px solid #8ceaf8;
+  outline-offset: -2px;
+}
+
+.activity-chart-panel .chart-legend,
+.activity-chart-panel .chart-bottomline {
+  color: #a8c7d3;
+  font-size: 11px;
+}
+
+.activity-chart-panel .chart-legend i {
+  width: 12px;
+  height: 3px;
+}
+
+.activity-chart-panel .legend-input,
+.activity-chart-panel .dot-blue {
+  background: #59dff5;
+  box-shadow: 0 0 8px #59dff580;
+}
+
+.activity-chart-panel .legend-output,
+.activity-chart-panel .dot-coral {
+  background: #ff687d;
+  box-shadow: 0 0 8px #ff687d80;
+}
+
+.activity-chart-panel .chart-frame {
+  height: 282px;
+  margin: 16px 0 10px;
+  background:
+    radial-gradient(ellipse at 55% 110%, #155a6d42, transparent 65%),
+    linear-gradient(180deg, #0a2130, #071622);
+  border: 1px solid #1c3e50;
+  border-radius: 5px;
+}
+
+.activity-chart-panel .recharts-line-curve,
+.activity-chart-panel .recharts-area-curve {
+  filter: url(#activity-chart-glow);
+}
+
+.activity-chart-panel .agent-line-legend {
+  gap: 7px;
+  max-height: 100px;
+  margin: 0;
+  padding: 4px 0 2px;
+}
+
+.activity-chart-panel .agent-line-legend span {
+  max-width: 100%;
+  padding: 5px 8px;
+  color: #b7d1dc;
+  background: #0b2534;
+  border: 1px solid #214557;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.activity-chart-panel .agent-line-legend i {
+  width: 13px;
+  height: 3px;
+}
+
+.activity-chart-panel .agent-line-legend strong {
+  color: #e9f9ff;
+  font: 11px var(--font-mono);
+}
+
+.activity-chart-panel .chart-bottomline {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1e4051;
+}
+
+.activity-chart-panel .chart-bottomline .chart-period {
+  color: #84a8b8;
+}
+
+.activity-chart-panel .empty-state {
+  color: #aac6d2;
+}
+
+@media (max-width: 700px) {
+  .activity-chart-panel.trend-panel {
+    padding: 16px 14px 14px;
+  }
+
+  .activity-chart-panel.trend-panel::before {
+    left: 14px;
+  }
+
+  .activity-chart-panel .panel-heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .activity-chart-panel .chart-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .activity-chart-panel .chart-frame {
+    height: 230px;
+  }
+}

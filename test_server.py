@@ -11,6 +11,8 @@ from fastapi import HTTPException
 import server
 from store import UsageStore
 from telemetry import AgentTelemetry
+from teams import TEAM_NAMES
+from test_store import event
 
 
 class AgentTelemetryTests(unittest.TestCase):
@@ -99,6 +101,23 @@ class DeleteUserUsageTests(unittest.TestCase):
 
             result = server.delete_user_usage("alice", "Bearer admin-secret")
         self.assertEqual(result, {"user": "alice", "deleted_events": 0})
+
+
+class TeamUsageApiTests(unittest.TestCase):
+    def test_usage_includes_stable_canonical_demo_memberships(self):
+        with tempfile.TemporaryDirectory() as directory:
+            usage_store = UsageStore(directory)
+            usage_store.add_events([
+                event("alias", "2860041", 100),
+                event("canonical", "eswarasai-25", 200),
+                event("unknown", "unknown", 50),
+            ])
+            with patch.object(server, "store", usage_store):
+                payload = server.usage()
+                self.assertEqual(payload["teams"]["names"], list(TEAM_NAMES))
+                self.assertTrue(payload["teams"]["demo"])
+                self.assertEqual(list(payload["teams"]["assignments"]), ["eswarasai-25"])
+                self.assertEqual(server.usage()["teams"], payload["teams"])
 
 
 if __name__ == "__main__":

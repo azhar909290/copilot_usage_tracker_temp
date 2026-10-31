@@ -32,6 +32,8 @@ IGNORED_USERS = {
 # Canonical team GitHub accounts
 TEAM_GITHUB_USERS = [
     "AnirudhTrivedi",
+    "azhagesan",
+    "yedukrishnan",
     "anishkgeorge",
     "ar-arunkumar",
     "Ashik1598753",
@@ -71,6 +73,10 @@ TEAM_GITHUB_USERS = [
 # Explicit alias / employee ID / OS login -> canonical GitHub account
 DEFAULT_USER_MAPPINGS = {
     "azharudeens": "azhar909290",
+    "EswaraGollangi": "eswarasai-25",
+    "2860041": "eswarasai-25",
+    "2734450": "azhagesan",
+    "2722102": "yedukrishnan",
     "chandru": "ChandruM56",
     "2869784": "Hariharan07082002",
     "2862531": "Ashik1598753",
@@ -88,10 +94,11 @@ DEFAULT_USER_MAPPINGS = {
     "jordan.taylor": "seshadrisastrykvss",
     "lisa.wong": "rajasekar1809",
     "marcus.vance": "Hariharan07082002",
-    "priya.patel": "Keerthana-purushothaman",
+    "KeerthanaP": "Keerthana-purushothaman",
     "rachel.adams": "RamyaMurugan-tcs",
     "samuel.green": "Ganeshkumar-Balu",
     "sarah.chen": "Sanjay-Kumar-S-3",
+    "GnaneeshwarAariDamod": "gnaneeshwar-a-d",
 }
 
 

@@ -46,6 +46,8 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -55,6 +57,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useDashboardTheme } from "./theme";
 import AgentNetwork from "./AgentNetwork";
+import TeamUsage, { buildTeamRows, getUserTeam, isTeamData, type TeamData } from "./TeamUsage";
+import "./activity-chart.css";
 
 type UsageRow = {
   date: string;
@@ -120,6 +124,22 @@ type DailyPoint = {
   cost: number;
 };
 
+const AGENT_CHART_LIMIT = 5;
+const AGENT_CHART_COLORS = ["#59dff5", "#ff687d", "#8ce1bc", "#b8a2ff", "#f6c875"];
+const CHART_ANIMATION = {
+  isAnimationActive: true,
+  animationDuration: 1200,
+  animationEasing: "ease-in-out",
+} as const;
+const CHART_TICK = { fill: "#90b4c6", fontSize: 11 };
+const CHART_TOOLTIP_STYLE = {
+  background: "#0b1c2a",
+  color: "#e5f7ff",
+  border: "1px solid #28546b",
+  borderRadius: 6,
+};
+const CHART_TOOLTIP_LABEL_STYLE = { color: "#f2fbff", fontWeight: 700 };
+
 const API_BASE = (
   process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318"
 ).replace(/\/$/, "");
@@ -153,6 +173,18 @@ function displayDate(date: string, options?: Intl.DateTimeFormatOptions) {
   return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", options);
 }
 
+function ChartGlowFilter() {
+  return (
+    <filter id="activity-chart-glow" filterUnits="userSpaceOnUse" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  );
+}
+
 function displayCallTime(timestamp: string | null | undefined) {
   if (!timestamp) return "Time unavailable";
   return new Date(timestamp).toLocaleString("en-US", {
@@ -181,6 +213,10 @@ const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = 
 
 export default function Home() {
   const [view, setView] = useState<View>("overview");
+  const [chartMode, setChartMode] = useState<"tokens" | "agents">("tokens");
+  const [userView, setUserView] = useState<"users" | "teams">("users");
+  const [selectedTeam, setSelectedTeam] = useState("all");
+  const [teamData, setTeamData] = useState<TeamData | null>(null);
   const [period, setPeriod] = useState<Period>(30);
   const [selectedUser, setSelectedUser] = useState("all");
   const [selectedAgent, setSelectedAgent] = useState("all");
@@ -253,6 +289,7 @@ export default function Home() {
         if (!active) return;
         const rows = Array.isArray(usagePayload.rows) ? usagePayload.rows : [];
         setUsageRows(rows);
+        setTeamData(isTeamData(usagePayload.teams) ? usagePayload.teams : null);
         setCurrency(usagePayload.currency || "USD");
         setCatalog(agentPayload);
         if (Array.isArray(usagePayload.events) && usagePayload.events.length > 0) {
@@ -320,13 +357,14 @@ export default function Home() {
     const matchesUser = selectedUser === "all" || row.user === selectedUser;
     const matchesAgent = selectedAgent === "all" || row.agent === selectedAgent;
     const matchesModel = selectedModel === "all" || row.model === selectedModel;
+    const matchesTeam = view !== "users" || selectedTeam === "all" || getUserTeam(row.user, teamData) === selectedTeam;
     const query = search.trim().toLowerCase();
     const matchesSearch =
       view === "agents" || !query ||
       [row.date, row.user, row.agent, row.model].some((value) =>
         value.toLowerCase().includes(query),
       );
-    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
+    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesTeam && matchesSearch;
   });
 
   const filteredEvents = callEvents.filter((event) => {
@@ -364,6 +402,7 @@ export default function Home() {
       .map((row) => row.agent.trim())
       .filter((agent) => agent && agent.toLowerCase() !== "unknown"),
   ).size;
+  const totalAgents = catalog?.agents?.length ?? 0;
   const modelsUsed = new Set(filteredRows.map((row) => row.model)).size;
   const liveUsers = getLiveUsers(callEvents, now);
 
@@ -394,9 +433,40 @@ export default function Home() {
     modelMap.set(row.model, model);
   }
   const modelRows = [...modelMap.values()].sort((a, b) => b.tokens - a.tokens);
-  const agentMap = new Map<string, number>();
+  const agentGraphDates = cutoffDate && updatedAt
+    ? Array.from({ length: period }, (_, index) =>
+        new Date(Date.parse(`${cutoffDate}T00:00:00Z`) + index * 86_400_000)
+          .toISOString()
+          .slice(0, 10),
+      )
+    : dailySeries.map((point) => point.date);
+  const graphDateSet = new Set(agentGraphDates);
+  const agentCalls = new Map<string, number>();
   for (const row of filteredRows) {
-    agentMap.set(row.agent, (agentMap.get(row.agent) || 0) + row.requests);
+    const name = row.agent.trim();
+    if (graphDateSet.has(row.date) && row.requests > 0 && name && name.toLowerCase() !== "unknown") {
+      agentCalls.set(name, (agentCalls.get(name) || 0) + row.requests);
+    }
+  }
+  const topGraphAgents = [...agentCalls.entries()]
+    .sort(([nameA, callsA], [nameB, callsB]) => callsB - callsA || nameA.localeCompare(nameB))
+    .slice(0, AGENT_CHART_LIMIT);
+  const agentDataKeys = new Map(topGraphAgents.map(([name], index) => [name, `agent_${index}`]));
+  const agentSeries = agentGraphDates.map((date) => {
+    const point: Record<string, string | number> = {
+      date,
+      label: displayDate(date, { month: "short", day: "numeric" }),
+    };
+    for (const key of agentDataKeys.values()) point[key] = 0;
+    return point;
+  });
+  const agentDateIndexes = new Map(agentSeries.map((point, index) => [String(point.date), index]));
+  for (const row of filteredRows) {
+    const key = agentDataKeys.get(row.agent.trim());
+    const index = agentDateIndexes.get(row.date);
+    if (key && index !== undefined && row.requests > 0) {
+      agentSeries[index][key] = Number(agentSeries[index][key]) + row.requests;
+    }
   }
   const agentNames = [...new Set([
     ...usageRows.map((row) => row.agent),
@@ -430,6 +500,20 @@ export default function Home() {
   }
 
   function exportCsv() {
+    if (view === "users" && userView === "teams" && teamData) {
+      const rows = buildTeamRows(filteredRows, teamData).filter((row) => selectedTeam === "all" || row.team === selectedTeam);
+      const columns = ["team", "members", "active_users", "requests", "input_tokens", "output_tokens", "total_tokens", "cost"] as const;
+      const csv = [
+        columns.map(getCsvValue).join(","),
+        ...rows.map((row) => columns.map((column) => getCsvValue(column === "members" ? row.members.length : row[column])).join(",")),
+      ].join("\n");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      link.download = "copilot-team-usage.csv";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      return;
+    }
     if (view === "activity") {
       const columns: (keyof CallEvent)[] = [
         "timestamp",
@@ -476,8 +560,11 @@ export default function Home() {
       "unpriced_requests",
     ];
     const csv = [
-      columns.map(getCsvValue).join(","),
-      ...filteredRows.map((row) => columns.map((column) => getCsvValue(row[column])).join(",")),
+      [...columns, ...(view === "users" ? ["team"] : [])].map(getCsvValue).join(","),
+      ...filteredRows.map((row) => [
+        ...columns.map((column) => getCsvValue(row[column])),
+        ...(view === "users" ? [getCsvValue(getUserTeam(row.user, teamData))] : []),
+      ].join(",")),
     ].join("\n");
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -647,6 +734,13 @@ export default function Home() {
               <LiveUsers users={liveUsers} now={now} loading={loading} />
               <section className="metric-grid" aria-label="Usage totals">
                 <article className="metric-card metric-highlight">
+                  <div className="metric-label">ACTIVE AGENTS <Bot size={14} /></div>
+                  <div className="metric-value">{loading ? "—" : formatCount(activeAgents)}<span className="metric-total"> / {formatCount(totalAgents)}</span></div>
+                  <div className="metric-foot">
+                    <span className="metric-mark purple-mark" /> active of {formatCount(totalAgents)} total agents available
+                  </div>
+                </article>
+                <article className="metric-card">
                   <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
                   <div className="metric-value">{loading ? "—" : formatCount(totals.requests)}</div>
                   <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the current results</div>
@@ -655,13 +749,6 @@ export default function Home() {
                   <div className="metric-label">TOTAL TOKENS <Boxes size={14} /></div>
                   <div className="metric-value">{loading ? "—" : formatCompact(totals.input + totals.output)}</div>
                   <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
-                </article>
-                <article className="metric-card">
-                  <div className="metric-label">ACTIVE AGENTS <Bot size={14} /></div>
-                  <div className="metric-value">{loading ? "—" : formatCount(activeAgents)}</div>
-                  <div className="metric-foot">
-                    <span className="metric-mark purple-mark" /> {selectedUser === "all" ? "Distinct agents in current results" : `Agents used by ${selectedUser}`}
-                  </div>
                 </article>
                 <article className="metric-card">
                   <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
@@ -676,30 +763,88 @@ export default function Home() {
               </section>
 
               <section className="token-consumption-section">
-                <article className="panel trend-panel">
+                <article className="panel trend-panel activity-chart-panel">
                   <div className="panel-heading">
-                    <div><div className="section-kicker">ACTIVITY</div><h2>Token consumption</h2></div>
-                    <div className="chart-legend"><span><i className="legend-input" /> Input</span><span><i className="legend-output" /> Output</span></div>
+                    <div>
+                      <div className="section-kicker">ACTIVITY</div>
+                      <h2>{chartMode === "tokens" ? "Token consumption" : "Agent usage"}</h2>
+                      <div className="agent-chart-caption">
+                        {chartMode === "tokens"
+                          ? "Daily input and output tokens"
+                          : topGraphAgents.length > 0
+                            ? `Top ${topGraphAgents.length} ${topGraphAgents.length === 1 ? "agent" : "agents"} by calls in this range`
+                            : "Daily calls by agent"}
+                      </div>
+                    </div>
+                    <div className="chart-controls">
+                      <div className="chart-toggle" role="group" aria-label="Chart metric">
+                        <button type="button" className={chartMode === "tokens" ? "active" : ""} aria-pressed={chartMode === "tokens"} onClick={() => setChartMode("tokens")}>Token consumption</button>
+                        <button type="button" className={chartMode === "agents" ? "active" : ""} aria-pressed={chartMode === "agents"} onClick={() => setChartMode("agents")}>Agent usage</button>
+                      </div>
+                      {chartMode === "tokens" ? <div className="chart-legend"><span><i className="legend-input" /> Input</span><span><i className="legend-output" /> Output</span></div>
+                        : null}
+                    </div>
                   </div>
-                  {dailySeries.length ? (
+                  {chartMode === "agents" ? topGraphAgents.length && agentSeries.length ? (
+                    <>
+                      <div className="chart-frame">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={agentSeries} margin={{ top: 12, right: 8, left: -12, bottom: 0 }}>
+                            <defs><ChartGlowFilter /></defs>
+                            <CartesianGrid stroke="var(--trend-grid)" strokeDasharray="3 7" />
+                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={CHART_TICK} minTickGap={24} />
+                            <YAxis axisLine={false} tickLine={false} tick={CHART_TICK} tickFormatter={formatCompact} allowDecimals={false} />
+                            <Tooltip
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              formatter={(value, name) => [`${formatCount(Number(value))} calls`, String(name)]}
+                              labelStyle={CHART_TOOLTIP_LABEL_STYLE}
+                              cursor={{ stroke: "#79b9ca", strokeDasharray: "4 4" }}
+                            />
+                            {topGraphAgents.map(([name], index) => {
+                              const dataKey = agentDataKeys.get(name);
+                              return dataKey ? (
+                                <Line
+                                  key={name}
+                                  type="monotone"
+                                  dataKey={dataKey}
+                                  name={name}
+                                  stroke={AGENT_CHART_COLORS[index]}
+                                  strokeWidth={2}
+                                  dot={false}
+                                  activeDot={{ r: 4, strokeWidth: 0 }}
+                                  {...CHART_ANIMATION}
+                                />
+                              ) : null;
+                            })}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="agent-line-legend" role="list" aria-label="Agent usage line chart legend">
+                        {topGraphAgents.map(([name, calls], index) => (
+                          <span key={name} role="listitem"><i style={{ background: AGENT_CHART_COLORS[index] }} />{name} <strong>{formatCount(calls)}</strong></span>
+                        ))}
+                      </div>
+                    </>
+                  ) : <EmptyState loading={loading} label="No agent activity in this date range." /> : dailySeries.length ? (
                     <div className="chart-frame">
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={dailySeries} margin={{ top: 12, right: 8, left: -12, bottom: 0 }}>
                           <defs>
-                            <linearGradient id="inputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5488e8" stopOpacity={0.22} /><stop offset="100%" stopColor="#5488e8" stopOpacity={0} /></linearGradient>
-                            <linearGradient id="outputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#df7057" stopOpacity={0.19} /><stop offset="100%" stopColor="#df7057" stopOpacity={0} /></linearGradient>
+                            <ChartGlowFilter />
+                            <linearGradient id="inputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#59dff5" stopOpacity={0.3} /><stop offset="100%" stopColor="#59dff5" stopOpacity={0} /></linearGradient>
+                            <linearGradient id="outputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ff687d" stopOpacity={0.24} /><stop offset="100%" stopColor="#ff687d" stopOpacity={0} /></linearGradient>
                           </defs>
-                          <CartesianGrid stroke="var(--line)" vertical={false} />
-                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} minTickGap={24} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} tickFormatter={formatCompact} />
-                          <Tooltip contentStyle={{ background: "var(--surface)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6 }} formatter={(value, name) => [formatCount(Number(value)), name === "input" ? "Input tokens" : "Output tokens"]} labelStyle={{ color: "var(--ink)", fontWeight: 700 }} />
-                          <Area type="monotone" dataKey="input" name="input" stroke="#5488e8" strokeWidth={2.2} fill="url(#inputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
-                          <Area type="monotone" dataKey="output" name="output" stroke="#df7057" strokeWidth={2.2} fill="url(#outputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
+                          <CartesianGrid stroke="var(--trend-grid)" strokeDasharray="3 7" />
+                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={CHART_TICK} minTickGap={24} />
+                          <YAxis axisLine={false} tickLine={false} tick={CHART_TICK} tickFormatter={formatCompact} />
+                          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value, name) => [formatCount(Number(value)), name === "input" ? "Input tokens" : "Output tokens"]} labelStyle={CHART_TOOLTIP_LABEL_STYLE} cursor={{ stroke: "#79b9ca", strokeDasharray: "4 4" }} />
+                          <Area type="monotone" dataKey="input" name="input" stroke="#59dff5" strokeWidth={2.2} fill="url(#inputFill)" activeDot={{ r: 4, strokeWidth: 0 }} {...CHART_ANIMATION} />
+                          <Area type="monotone" dataKey="output" name="output" stroke="#ff687d" strokeWidth={2.2} fill="url(#outputFill)" activeDot={{ r: 4, strokeWidth: 0 }} {...CHART_ANIMATION} />
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
                   ) : <EmptyState loading={loading} label="No token activity in this date range." />}
-                  <div className="chart-bottomline"><span><i className="dot-blue" /> {formatCount(totals.input)} input tokens</span><span><i className="dot-coral" /> {formatCount(totals.output)} output tokens</span><span className="chart-period">{period}-DAY WINDOW</span></div>
+                  <div className="chart-bottomline">{chartMode === "tokens" ? <><span><i className="dot-blue" /> {formatCount(totals.input)} input tokens</span><span><i className="dot-coral" /> {formatCount(totals.output)} output tokens</span></> : <><span><i className="dot-blue" /> {formatCount(totals.requests)} total calls</span><span><i className="dot-coral" /> {formatCount(activeAgents)} active agents</span></>}<span className="chart-period">{period}-DAY WINDOW</span></div>
                 </article>
               </section>
 
@@ -743,8 +888,22 @@ export default function Home() {
 
           {view === "users" && (
             <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>Usage by user</h2></div><span className="inventory-count">{userNames.length} USERS · {liveUsers.length} LIVE</span></div>
-              <UserTable rows={filteredRows} currency={currency} liveUsers={liveUsers} now={now} />
+              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>{userView === "teams" ? "Usage by team" : "Usage by user"}</h2></div><span className="inventory-count">{userNames.length} USERS · {liveUsers.length} LIVE</span></div>
+              <div className="team-view-controls">
+                <div className="team-view-toggle" role="group" aria-label="User usage view">
+                  <button type="button" aria-pressed={userView === "users"} onClick={() => setUserView("users")}>Users</button>
+                  <button type="button" aria-pressed={userView === "teams"} onClick={() => setUserView("teams")} disabled={!teamData}>Teams</button>
+                </div>
+                {teamData && <label className="select-filter"><select aria-label="Filter by team" value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>
+                  <option value="all">All teams</option>
+                  {teamData.names.map((name) => <option key={name} value={name}>{name}</option>)}
+                  <option value="Unassigned">Unassigned</option>
+                </select></label>}
+              </div>
+              <p className="team-demo-note">{teamData ? <><strong>Demo memberships.</strong> People were randomly assigned and saved; these are not actual organizational memberships.</> : "Team assignments are unavailable from the receiver. Restart the API to enable saved demo teams."}</p>
+              {userView === "teams" && teamData
+                ? <TeamUsage rows={filteredRows} teams={teamData} selectedTeam={selectedTeam} currency={currency} onSelect={(team) => { setSelectedTeam(team); setUserView("users"); }} />
+                : <UserTable rows={filteredRows} currency={currency} liveUsers={liveUsers} now={now} teams={teamData} />}
             </section>
           )}
 
@@ -822,27 +981,51 @@ function UsageHeatmap({
   onSelect: (date: string) => void;
 }) {
   if (!endDate) return null;
+  const DAY = 86_400_000;
   const end = Date.parse(`${endDate}T00:00:00Z`);
   const counts = new Map<string, number>();
   for (const row of rows) counts.set(row.date, (counts.get(row.date) || 0) + row.requests);
   const maximum = Math.max(1, ...counts.values());
-  const start = end - (period - 1) * 86_400_000;
+  const start = end - (period - 1) * DAY;
+  const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
   const offset = new Date(start).getUTCDay();
-  const cells = Array.from({ length: offset + period }, (_, index) => {
-    if (index < offset) return <span className="heatmap-spacer" key={`spacer-${index}`} />;
-    const date = new Date(start + (index - offset) * 86_400_000).toISOString().slice(0, 10);
+  const weekStart = start - offset * DAY;
+  const weekCount = Math.ceil((offset + period) / 7);
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  let best = { date: "", count: 0 };
+  let streak = 0;
+  let longest = 0;
+  for (let t = start; t <= end; t += DAY) {
+    const date = new Date(t).toISOString().slice(0, 10);
     const count = counts.get(date) || 0;
-    const level = count ? Math.max(1, Math.ceil((count / maximum) * 4)) : 0;
-    return (
-      <button
-        className={`heatmap-cell level-${level}`}
-        key={date}
-        type="button"
-        title={`${date}: ${formatCount(count)} calls`}
-        aria-label={`${date}: ${formatCount(count)} calls`}
-        onClick={() => onSelect(date)}
-      />
-    );
+    if (count > best.count) best = { date, count };
+    streak = count ? streak + 1 : 0;
+    longest = Math.max(longest, streak);
+  }
+
+  const weeks = Array.from({ length: weekCount }, (_, w) => {
+    const first = new Date(weekStart + w * 7 * DAY);
+    const monthLabel = first.getUTCDate() <= 7 || w === 0 ? first.toLocaleString("en", { month: "short", timeZone: "UTC" }) : "";
+    const days = Array.from({ length: 7 }, (_, d) => {
+      const t = weekStart + (w * 7 + d) * DAY;
+      if (t < start || t > end) return <span className="cal-cell cal-empty" key={d} />;
+      const date = new Date(t).toISOString().slice(0, 10);
+      const count = counts.get(date) || 0;
+      const level = count ? Math.max(1, Math.ceil((count / maximum) * 4)) : 0;
+      const label = `${new Date(t).toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}: ${formatCount(count)} calls`;
+      return (
+        <button
+          className={`cal-cell level-${level}${date === todayKey ? " cal-today" : ""}`}
+          key={date}
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={() => onSelect(date)}
+        />
+      );
+    });
+    return <div className="cal-week" key={w}><span className="cal-month">{monthLabel}</span>{days}</div>;
   });
 
   return (
@@ -854,30 +1037,20 @@ function UsageHeatmap({
         </div>
         <span className="inventory-count">{counts.size} ACTIVE DAYS</span>
       </div>
-      <div className="heatmap-layout">
-        <div className="heatmap-calendar-wrap">
-          <div className="heatmap-day-labels">
-            <span>Sun</span>
-            <span>Mon</span>
-            <span>Tue</span>
-            <span>Wed</span>
-            <span>Thu</span>
-            <span>Fri</span>
-            <span>Sat</span>
-          </div>
-          <div className="heatmap-grid">{cells}</div>
-        </div>
-        <div className="heatmap-summary">
-          <strong>{formatCount(rows.reduce((total, row) => total + row.requests, 0))}</strong>
-          <span>calls / {period} days</span>
-          <div className="heatmap-legend">
-            <span>Less</span>
-            {[0, 1, 2, 3, 4].map((level) => (
-              <i key={level} className={`heatmap-cell level-${level}`} />
-            ))}
-            <span>More</span>
-          </div>
-        </div>
+      <div className="cal-stats">
+        <div><strong>{formatCount(total)}</strong><span>calls / {period} days</span></div>
+        <div><strong>{formatCount(Math.round(total / period))}</strong><span>avg per day</span></div>
+        <div><strong>{best.count ? formatCount(best.count) : "—"}</strong><span>{best.date ? `peak · ${best.date.slice(5)}` : "peak day"}</span></div>
+        <div><strong>{longest}d</strong><span>longest streak</span></div>
+      </div>
+      <div className="cal-board">
+        <div className="cal-days"><span /><span>Mon</span><span /><span>Wed</span><span /><span>Fri</span><span /></div>
+        <div className="cal-weeks">{weeks}</div>
+      </div>
+      <div className="heatmap-legend">
+        <span>Less</span>
+        {[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell level-${level}`} />)}
+        <span>More</span>
       </div>
     </section>
   );
@@ -2343,14 +2516,16 @@ function UserTable({
   currency,
   liveUsers,
   now,
+  teams,
 }: {
   rows: UsageRow[];
   currency: string;
   liveUsers: LiveUser[];
   now: number;
+  teams: TeamData | null;
 }) {
   const liveSince = new Map(liveUsers.map((item) => [item.user, item.lastSeen]));
-  type UserSortKey = "user" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
+  type UserSortKey = "user" | "team" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
   const [sort, setSort] = useState<{ key: UserSortKey; direction: "asc" | "desc" }>({
     key: "cost",
     direction: "desc",
@@ -2387,6 +2562,7 @@ function UserTable({
     const share = totalTokens ? (tokens / totalTokens) * 100 : 0;
     return {
       user,
+      team: getUserTeam(user, teams),
       requests: measure.requests,
       input: measure.input,
       output: measure.output,
@@ -2419,7 +2595,7 @@ function UserTable({
                 ? current.direction === "asc"
                   ? "desc"
                   : "asc"
-                : key === "user"
+                : key === "user" || key === "team"
                 ? "asc"
                 : "desc",
           }))
@@ -2438,6 +2614,7 @@ function UserTable({
         <thead>
           <tr>
             {sortHeader("user", "USER")}
+            {teams && sortHeader("team", "TEAM")}
             {sortHeader("requests", "CALLS")}
             {sortHeader("input", "INPUT TOKENS")}
             {sortHeader("output", "OUTPUT TOKENS")}
@@ -2459,6 +2636,7 @@ function UserTable({
                   </span>
                 )}
               </td>
+              {teams && <td>{item.team}</td>}
               <td>{formatCount(item.requests)}</td>
               <td>{formatCount(item.input)}</td>
               <td>{formatCount(item.output)}</td>

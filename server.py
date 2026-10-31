@@ -197,6 +197,7 @@ def usage():
         "currency": prices.currency,
         "rows": store.summary(),
         "events": store.get_events(),
+        "teams": store.get_teams(),
     }
 
 

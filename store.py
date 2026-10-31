@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from user_mapping import normalize_user, FILE_EXTENSION_PATTERN
+from teams import DemoTeams
 
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
@@ -28,6 +29,7 @@ class UsageStore:
         self._seen: set[str] = set()
         self._daily: dict[tuple, dict] = {}
         self._events: list[dict] = []
+        self._teams = DemoTeams(self.dir / "team_assignments.json")
         self._replay()
 
     def _accumulate(self, e: dict) -> None:
@@ -109,6 +111,7 @@ class UsageStore:
     def delete_user(self, username: str) -> int:
         with self._lock:
             if not self.events_path.exists():
+                self._teams.remove_user(username)
                 return 0
 
             retained_lines = []
@@ -122,6 +125,7 @@ class UsageStore:
                         retained_lines.append(line)
 
             if not deleted:
+                self._teams.remove_user(username)
                 return 0
 
             temp_path = self.events_path.with_suffix(".tmp")
@@ -134,6 +138,7 @@ class UsageStore:
             self._events.clear()
             self._replay()
             self._flush_csv()
+            self._teams.remove_user(username)
             return deleted
 
     def _flush_csv(self) -> None:
@@ -168,3 +173,8 @@ class UsageStore:
             if limit and limit > 0:
                 return self._events[-limit:]
             return list(self._events)
+
+    def get_teams(self) -> dict:
+        with self._lock:
+            users = sorted({user for _, user, _, _ in self._daily})
+            return self._teams.for_users(users)
