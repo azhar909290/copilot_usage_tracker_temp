@@ -1,162 +1,221 @@
 "use client";
 
+import NumberFlow from "@number-flow/react";
 import {
   Activity,
   ArrowDownToLine,
   ArrowUpRight,
+  BookOpen,
   Bot,
   Boxes,
   ChevronDown,
-  CircleHelp,
-  Clock3,
-  Command,
+  Command as CommandIcon,
   Cpu,
+  Download,
   GitBranch,
-  LayoutDashboard,
-  LoaderCircle,
+  LayoutGrid,
   Moon,
   RefreshCw,
   Search,
-  ShieldAlert,
-  Sparkles,
   Sun,
+  TriangleAlert,
   Users,
   X,
-  Zap,
+  type LucideIcon,
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useRouter } from "next/navigation";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { BootLoader, type BootStage } from "@/components/BootLoader";
+import { Carousel } from "@/components/Carousel";
+import { CommandMenu, type CommandSection } from "@/components/CommandMenu";
+import { DailyBars } from "@/components/DailyBars";
+import { Person } from "@/components/Person";
+import { Rail, type RailItem } from "@/components/Rail";
+import { RidgeMark } from "@/components/RidgeMark";
+import { SignalRidge } from "@/components/SignalRidge";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+  csvCell,
+  displayCallTime,
+  formatAgo,
+  formatCompact,
+  formatCount,
+  formatMoney,
+  formatPercent,
+  formatSeconds,
+} from "@/lib/format";
+import {
+  computeFindings,
+  cutoffDate,
+  dailyTotals,
+  dayRange,
+  filterEvents,
+  filterRows,
+  getLiveUsers,
+  groupShares,
+  isUnknownUser,
+  latencyStats,
+  personHues,
+  ridgeData,
+  sumTotals,
+  type CallEvent,
+  type CatalogAgent,
+  type CatalogResponse,
+  type Finding,
+  type LiveUser,
+  type Metric,
+  type Period,
+  type Share,
+  type Totals,
+  type UsageRow,
+} from "@/lib/usage";
 import { useDashboardTheme } from "./theme";
 
-type UsageRow = {
-  date: string;
-  first_seen?: string | null;
-  last_seen?: string | null;
-  user: string;
-  agent: string;
-  model: string;
-  requests: number;
-  input_tokens: number;
-  output_tokens: number;
-  cost: number;
-  unpriced_requests: number;
-};
-
-type CallEvent = {
-  key: string;
-  timestamp: string;
-  date: string;
-  user: string;
-  agent: string;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens?: number;
-  latency_ms?: number | null;
-  cost: number;
-};
-
-type CatalogAgent = {
-  id: string;
-  name: string;
-  description: string;
-  plugin_id: string;
-  plugin_name: string;
-  version: string;
-  path: string;
-  kind?: "agent" | "skill_package";
-  skills?: string[];
-};
-
-type CatalogResponse = {
-  loaded_at: string | null;
-  stale: boolean;
-  error: string | null;
-  agents: CatalogAgent[];
-};
-
 type View = "overview" | "users" | "agents" | "models" | "activity";
-type Period = 7 | 30 | 90;
-type DailyPoint = {
-  date: string;
-  label: string;
-  input: number;
-  output: number;
-  requests: number;
-  cost: number;
-};
+type SortDirection = "asc" | "desc";
+type Sort<K extends string> = { key: K; direction: SortDirection };
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318"
-).replace(/\/$/, "");
+const API_BASE = (process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318").replace(/\/$/, "");
+const API_HOST = API_BASE.replace(/^https?:\/\//, "");
+const BOOT_MINIMUM_MS = 700;
 
-const numberFormat = new Intl.NumberFormat("en-US");
-
-function formatCount(value: number) {
-  return numberFormat.format(Math.round(value || 0));
-}
-
-function formatCompact(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value || 0);
-}
-
-function formatMoney(value: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 2,
-    }).format(value || 0);
-  } catch {
-    return `${currency} ${(value || 0).toFixed(2)}`;
-  }
-}
-
-function displayDate(date: string, options?: Intl.DateTimeFormatOptions) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", options);
-}
-
-function displayCallTime(timestamp: string | null | undefined) {
-  if (!timestamp) return "Time unavailable";
-  return new Date(timestamp).toLocaleString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short",
-  });
-}
-
-function compareLatest(a: UsageRow, b: UsageRow) {
-  return Date.parse(b.last_seen || `${b.date}T00:00:00Z`) -
-    Date.parse(a.last_seen || `${a.date}T00:00:00Z`);
-}
-
-function getCsvValue(value: string | number | null | undefined) {
-  const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-const navigation: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: "overview", label: "Command Center", icon: LayoutDashboard },
+const VIEWS: { id: View; label: string; icon: LucideIcon }[] = [
+  { id: "overview", label: "Overview", icon: LayoutGrid },
   { id: "users", label: "Users", icon: Users },
   { id: "agents", label: "Catalog", icon: Boxes },
   { id: "models", label: "Models", icon: Cpu },
   { id: "activity", label: "Activity", icon: Activity },
 ];
 
+const PERIODS: Period[] = [7, 30, 90];
+
+const INITIAL_STAGES: BootStage[] = [
+  { label: "Interface", detail: "Loading the dashboard", state: "active" },
+  { label: "Receiver", detail: API_HOST, state: "pending" },
+  { label: "Ledger", detail: "Usage, calls and catalog", state: "pending" },
+  { label: "Composing", detail: "Charts and findings", state: "pending" },
+];
+
+function compareValues(left: unknown, right: unknown) {
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left ?? "").localeCompare(String(right ?? ""));
+}
+
+function useSort<K extends string>(initial: Sort<K>, textKeys: K[]) {
+  const [sort, setSort] = useState(initial);
+  const toggle = (key: K) =>
+    setSort((current) => ({
+      key,
+      direction:
+        current.key === key
+          ? current.direction === "asc"
+            ? "desc"
+            : "asc"
+          : textKeys.includes(key)
+            ? "asc"
+            : "desc",
+    }));
+  return [sort, toggle] as const;
+}
+
+function SortHeader<K extends string>({
+  sortKey,
+  label,
+  sort,
+  onSort,
+  numeric = false,
+}: {
+  sortKey: K;
+  label: string;
+  sort: Sort<K>;
+  onSort: (key: K) => void;
+  numeric?: boolean;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      className={numeric ? "num" : undefined}
+      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button className="sort-button" data-active={active || undefined} type="button" onClick={() => onSort(sortKey)}>
+        <span className="sort-label">{label}</span>
+        {active && <span aria-hidden="true">{sort.direction === "asc" ? "↑" : "↓"}</span>}
+      </button>
+    </th>
+  );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="empty">{children}</p>;
+}
+
+function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+  format,
+  id,
+}: {
+  label: string;
+  options: T[];
+  value: T;
+  onChange: (value: T) => void;
+  format: (value: T) => string;
+  id: string;
+}) {
+  return (
+    <div className="segmented" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button key={option} type="button" aria-pressed={option === value} onClick={() => onChange(option)}>
+          {format(option)}
+          {option === value && (
+            <motion.span className="select-line" layoutId={id} transition={{ type: "spring", stiffness: 560, damping: 44 }} />
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FilterSelect({
+  label,
+  allLabel,
+  value,
+  options,
+  onChange,
+  icon: Icon,
+}: {
+  label: string;
+  allLabel: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  icon: LucideIcon;
+}) {
+  return (
+    <label className="select" data-active={value !== "all" || undefined}>
+      <Icon size={14} strokeWidth={1.6} aria-hidden="true" />
+      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="all">{allLabel}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} aria-hidden="true" />
+    </label>
+  );
+}
+
 export default function Home() {
+  const router = useRouter();
+  const reducedMotion = useReducedMotion();
+  const { theme, toggleTheme } = useDashboardTheme();
   const [view, setView] = useState<View>("overview");
   const [period, setPeriod] = useState<Period>(30);
+  const [metric, setMetric] = useState<Metric>("calls");
   const [selectedUser, setSelectedUser] = useState("all");
   const [selectedAgent, setSelectedAgent] = useState("all");
   const [selectedModel, setSelectedModel] = useState("all");
@@ -172,22 +231,30 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [now, setNow] = useState(0);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const paletteRef = useRef<HTMLDialogElement>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [commandQuery, setCommandQuery] = useState("");
-  const { theme, toggleTheme } = useDashboardTheme();
+  const [stages, setStages] = useState<BootStage[]>(INITIAL_STAGES);
+  const [booting, setBooting] = useState(true);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const bootPending = useRef(true);
+  const composeStarted = useRef(0);
+
+  function updateStage(index: number, patch: Partial<BootStage>) {
+    setStages((current) => current.map((stage, position) => (position === index ? { ...stage, ...patch } : stage)));
+  }
+
+  function finishBoot(delay = 0) {
+    window.setTimeout(() => setBooting(false), Math.max(delay, BOOT_MINIMUM_MS - performance.now()));
+  }
+
+  function showView(next: View) {
+    setView(next);
+    window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
+  }
 
   useEffect(() => {
-    if (paletteOpen) paletteRef.current?.showModal();
-    else paletteRef.current?.close();
-  }, [paletteOpen]);
-
-  useEffect(() => {
-    function focusSearch(event: KeyboardEvent) {
+    function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setCommandQuery("");
         setPaletteOpen((open) => !open);
         return;
       }
@@ -196,20 +263,25 @@ export default function Home() {
       if (
         target instanceof HTMLElement &&
         (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-      ) return;
+      )
+        return;
       event.preventDefault();
       searchRef.current?.focus();
     }
-    window.addEventListener("keydown", focusSearch);
-    return () => window.removeEventListener("keydown", focusSearch);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   useEffect(() => {
     let active = true;
 
     async function loadDashboard() {
-      if (active) {
-        setRefreshing(true);
+      const boot = bootPending.current;
+      const started = performance.now();
+      if (active) setRefreshing(true);
+      if (active && boot) {
+        updateStage(0, { state: "done", duration: started });
+        updateStage(1, { state: "active" });
       }
       try {
         const [usageResponse, agentResponse] = await Promise.all([
@@ -217,48 +289,57 @@ export default function Home() {
           fetch(`${API_BASE}/api/v1/agents`, { cache: "no-store" }),
         ]);
         if (!usageResponse.ok || !agentResponse.ok) {
-          throw new Error(
-            `API request failed: usage ${usageResponse.status}, agents ${agentResponse.status}`,
-          );
+          throw new Error(`API request failed: usage ${usageResponse.status}, agents ${agentResponse.status}`);
         }
-        const [usagePayload, agentPayload] = await Promise.all([
-          usageResponse.json(),
-          agentResponse.json(),
-        ]);
+        const connected = performance.now();
+        if (active && boot) {
+          updateStage(1, { state: "done", duration: connected - started });
+          updateStage(2, { state: "active" });
+        }
+        const [usagePayload, agentPayload] = await Promise.all([usageResponse.json(), agentResponse.json()]);
         if (!active) return;
-        const rows = Array.isArray(usagePayload.rows) ? usagePayload.rows : [];
+        const rows: UsageRow[] = Array.isArray(usagePayload.rows) ? usagePayload.rows : [];
+        const events: CallEvent[] =
+          Array.isArray(usagePayload.events) && usagePayload.events.length > 0
+            ? usagePayload.events
+            : rows.map((row, index) => ({
+                key: `${row.date}-${row.user}-${row.agent}-${row.model}-${index}`,
+                timestamp: row.last_seen || row.first_seen || `${row.date}T00:00:00Z`,
+                date: row.date,
+                user: row.user,
+                agent: row.agent,
+                model: row.model,
+                input_tokens: row.input_tokens,
+                output_tokens: row.output_tokens,
+                total_tokens: (row.input_tokens || 0) + (row.output_tokens || 0),
+                latency_ms: row.latency_ms_avg ?? null,
+                cost: row.cost,
+              }));
+        if (boot) {
+          updateStage(2, {
+            state: "done",
+            duration: performance.now() - connected,
+            detail: `${formatCount(events.length)} calls · ${formatCount(agentPayload?.agents?.length ?? 0)} catalog items`,
+          });
+          updateStage(3, { state: "active" });
+          composeStarted.current = performance.now();
+        }
         setUsageRows(rows);
         setCurrency(usagePayload.currency || "USD");
         setCatalog(agentPayload);
-        if (Array.isArray(usagePayload.events) && usagePayload.events.length > 0) {
-          setCallEvents(usagePayload.events);
-        } else {
-          setCallEvents(
-            rows.map((r: UsageRow, i: number) => ({
-              key: `${r.date}-${r.user}-${r.agent}-${r.model}-${i}`,
-              timestamp: r.last_seen || r.first_seen || `${r.date}T00:00:00Z`,
-              date: r.date,
-              user: r.user,
-              agent: r.agent,
-              model: r.model,
-              input_tokens: r.input_tokens,
-              output_tokens: r.output_tokens,
-              total_tokens: (r.input_tokens || 0) + (r.output_tokens || 0),
-              latency_ms: (r as any).latency_ms_avg ?? null,
-              cost: r.cost,
-            }))
-          );
-        }
+        setCallEvents(events);
         setUpdatedAt(new Date());
         setNow(Date.now());
         setError(null);
       } catch (loadError) {
-        if (active) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Could not connect to the usage API.",
+        if (!active) return;
+        setError(loadError instanceof Error ? loadError.message : "Could not connect to the usage API.");
+        if (boot) {
+          setStages((current) =>
+            current.map((stage) => (stage.state === "active" ? { ...stage, state: "failed" } : stage)),
           );
+          bootPending.current = false;
+          finishBoot(900);
         }
       } finally {
         if (active) {
@@ -269,132 +350,119 @@ export default function Home() {
     }
 
     void loadDashboard();
-    const interval = autoRefresh
-      ? window.setInterval(() => void loadDashboard(), 30_000)
-      : undefined;
+    const interval = autoRefresh ? window.setInterval(() => void loadDashboard(), 30_000) : undefined;
     return () => {
       active = false;
       if (interval) window.clearInterval(interval);
     };
   }, [autoRefresh, refreshKey]);
 
+  // The last boot stage completes once the first data has been committed and painted.
+  useEffect(() => {
+    if (!updatedAt || !bootPending.current) return;
+    bootPending.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      updateStage(3, { state: "done", duration: performance.now() - composeStarted.current });
+      finishBoot();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [updatedAt]);
+
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 15_000);
     return () => window.clearInterval(interval);
   }, []);
 
-  const cutoffDate = updatedAt
-    ? new Date(
-        Date.parse(`${updatedAt.toISOString().slice(0, 10)}T00:00:00Z`) -
-          (period - 1) * 86_400_000,
-      ).toISOString().slice(0, 10)
-    : null;
-
-  const filteredRows = usageRows.filter((row) => {
-    const matchesPeriod = !cutoffDate || row.date >= cutoffDate;
-    const matchesUser = selectedUser === "all" || row.user === selectedUser;
-    const matchesAgent = selectedAgent === "all" || row.agent === selectedAgent;
-    const matchesModel = selectedModel === "all" || row.model === selectedModel;
-    const query = search.trim().toLowerCase();
-    const matchesSearch =
-      !query ||
-      [row.date, row.user, row.agent, row.model].some((value) =>
-        value.toLowerCase().includes(query),
-      );
-    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
-  });
-
-  const filteredEvents = callEvents.filter((event) => {
-    const matchesPeriod = !cutoffDate || event.date >= cutoffDate;
-    const matchesUser = selectedUser === "all" || event.user === selectedUser;
-    const matchesAgent = selectedAgent === "all" || event.agent === selectedAgent;
-    const matchesModel = selectedModel === "all" || event.model === selectedModel;
-    const query = search.trim().toLowerCase();
-    const matchesSearch =
-      !query ||
-      [event.date, event.user, event.agent, event.model, event.timestamp].some((value) =>
-        value.toLowerCase().includes(query),
-      );
-    return matchesPeriod && matchesUser && matchesAgent && matchesModel && matchesSearch;
-  });
-
-  const totals = filteredRows.reduce(
-    (summary, row) => ({
-      requests: summary.requests + row.requests,
-      input: summary.input + row.input_tokens,
-      output: summary.output + row.output_tokens,
-      cost: summary.cost + row.cost,
-      unpriced: summary.unpriced + row.unpriced_requests,
+  const filters = useMemo(
+    () => ({
+      cutoff: cutoffDate(updatedAt, period),
+      user: selectedUser,
+      agent: selectedAgent,
+      model: selectedModel,
+      search,
     }),
-    { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0 },
+    [updatedAt, period, selectedUser, selectedAgent, selectedModel, search],
   );
-  const activeUsers = new Set(
-    filteredRows
-      .map((row) => row.user)
-      .filter((user) => user.trim().toLowerCase() !== "unknown"),
-  ).size;
-  const modelsUsed = new Set(filteredRows.map((row) => row.model)).size;
-  const liveUsers = getLiveUsers(callEvents, now);
+  const filteredRows = useMemo(() => filterRows(usageRows, filters), [usageRows, filters]);
+  const filteredEvents = useMemo(() => filterEvents(callEvents, filters), [callEvents, filters]);
+  const totals = useMemo(() => sumTotals(filteredRows), [filteredRows]);
+  const latency = useMemo(() => latencyStats(filteredEvents), [filteredEvents]);
+  const liveUsers = useMemo(() => getLiveUsers(callEvents, now), [callEvents, now]);
+  const today = updatedAt ? updatedAt.toISOString().slice(0, 10) : null;
+  const days = useMemo(() => {
+    if (!today || !filters.cutoff) return [];
+    const latest = filteredRows.reduce((last, row) => (row.date > last ? row.date : last), today);
+    return dayRange(filters.cutoff, latest);
+  }, [today, filters.cutoff, filteredRows]);
+  const agentNames = useMemo(
+    () => [...new Set([...usageRows.map((row) => row.agent), ...callEvents.map((event) => event.agent)])].sort(),
+    [usageRows, callEvents],
+  );
+  const modelNames = useMemo(
+    () => [...new Set([...usageRows.map((row) => row.model), ...callEvents.map((event) => event.model)])].sort(),
+    [usageRows, callEvents],
+  );
+  const userNames = useMemo(
+    () => [...new Set([...usageRows.map((row) => row.user), ...callEvents.map((event) => event.user)])].sort(),
+    [usageRows, callEvents],
+  );
+  const hues = useMemo(() => personHues(userNames), [userNames]);
+  const rangeLabel = `the last ${period} days`;
+  const findings = useMemo(
+    () => computeFindings({ rows: filteredRows, events: filteredEvents, totals, rangeLabel }),
+    [filteredRows, filteredEvents, totals, rangeLabel],
+  );
+  const modelShares = useMemo(() => groupShares(filteredRows, "model"), [filteredRows]);
+  const activeUsers = useMemo(
+    () => new Set(filteredRows.map((row) => row.user).filter((user) => !isUnknownUser(user))).size,
+    [filteredRows],
+  );
+  const filtersActive = selectedUser !== "all" || selectedAgent !== "all" || selectedModel !== "all" || search !== "";
 
-  const dailyMap = new Map<string, DailyPoint>();
-  for (const row of filteredRows) {
-    const point = dailyMap.get(row.date) || {
-      date: row.date,
-      label: displayDate(row.date, { month: "short", day: "numeric" }),
-      input: 0,
-      output: 0,
-      requests: 0,
-      cost: 0,
-    };
-    point.input += row.input_tokens;
-    point.output += row.output_tokens;
-    point.requests += row.requests;
-    point.cost += row.cost;
-    dailyMap.set(row.date, point);
+  function clearFilters() {
+    setSelectedUser("all");
+    setSelectedAgent("all");
+    setSelectedModel("all");
+    setSearch("");
   }
-  const dailySeries = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-  const modelMap = new Map<string, { model: string; calls: number; tokens: number; cost: number }>();
-  for (const row of filteredRows) {
-    const model = modelMap.get(row.model) || { model: row.model, calls: 0, tokens: 0, cost: 0 };
-    model.calls += row.requests;
-    model.tokens += row.input_tokens + row.output_tokens;
-    model.cost += row.cost;
-    modelMap.set(row.model, model);
+  function applyFinding(finding: Finding) {
+    const action = finding.action;
+    if (!action) return;
+    switch (action.kind) {
+      case "models":
+      case "users":
+      case "activity":
+        showView(action.kind);
+        break;
+      case "model":
+        setSelectedModel(action.value);
+        break;
+      case "agent":
+        setSelectedAgent(action.value);
+        break;
+      case "user":
+        setSelectedUser(action.value);
+        break;
+      case "date":
+        openDay(action.value);
+        break;
+    }
   }
-  const modelRows = [...modelMap.values()].sort((a, b) => b.tokens - a.tokens);
-  const agentMap = new Map<string, number>();
-  for (const row of filteredRows) {
-    agentMap.set(row.agent, (agentMap.get(row.agent) || 0) + row.requests);
-  }
-  const agentNames = [...new Set([...usageRows.map((row) => row.agent), ...callEvents.map((e) => e.agent)])].sort();
-  const modelNames = [...new Set([...usageRows.map((row) => row.model), ...callEvents.map((e) => e.model)])].sort();
-  const userNames = [...new Set([...usageRows.map((row) => row.user), ...callEvents.map((e) => e.user)])].sort();
-  const activeLabel = navigation.find((item) => item.id === view)?.label || "Overview";
-  const commands = [
-    ...navigation.map((item) => ({
-      label: item.label, kind: "View", icon: item.icon,
-      run: () => setView(item.id),
-    })),
-    ...agentNames.map((name) => ({
-      label: name, kind: "Agent", icon: Bot,
-      run: () => { setView("agents"); setSelectedAgent(name); setSelectedUser("all"); setSelectedModel("all"); setSearch(""); },
-    })),
-    ...userNames.map((name) => ({
-      label: name, kind: "User", icon: Users,
-      run: () => { setView("users"); setSelectedUser(name); setSelectedAgent("all"); setSelectedModel("all"); setSearch(""); },
-    })),
-    { label: "Refresh data", kind: "Action", icon: RefreshCw, run: () => setRefreshKey((key) => key + 1) },
-    { label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode", kind: "Action", icon: Sun, run: toggleTheme },
-    { label: "Clear filters", kind: "Action", icon: X, run: () => { setSelectedUser("all"); setSelectedAgent("all"); setSelectedModel("all"); setSearch(""); } },
-  ].filter((item) => item.label.toLowerCase().includes(commandQuery.trim().toLowerCase())).slice(0, 12);
 
-  function runCommand(command: (typeof commands)[number]) {
-    command.run();
-    setPaletteOpen(false);
+  function openDay(date: string) {
+    setSearch(date);
+    showView("activity");
   }
 
   function exportCsv() {
+    const download = (content: string, filename: string) => {
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    };
     if (view === "activity") {
       const columns: (keyof CallEvent)[] = [
         "timestamp",
@@ -409,22 +477,18 @@ export default function Home() {
         "cost",
       ];
       const csv = [
-        columns.map(getCsvValue).join(","),
+        columns.map(csvCell).join(","),
         ...filteredEvents.map((event) =>
           columns
             .map((column) =>
               column === "total_tokens"
-                ? getCsvValue((event.input_tokens || 0) + (event.output_tokens || 0))
-                : getCsvValue(event[column])
+                ? csvCell((event.input_tokens || 0) + (event.output_tokens || 0))
+                : csvCell(event[column]),
             )
-            .join(",")
+            .join(","),
         ),
       ].join("\n");
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-      link.download = "copilot-call-activity.csv";
-      link.click();
-      URL.revokeObjectURL(link.href);
+      download(csv, "copilot-call-activity.csv");
       return;
     }
     const columns: (keyof UsageRow)[] = [
@@ -441,821 +505,910 @@ export default function Home() {
       "unpriced_requests",
     ];
     const csv = [
-      columns.map(getCsvValue).join(","),
-      ...filteredRows.map((row) => columns.map((column) => getCsvValue(row[column])).join(",")),
+      columns.map(csvCell).join(","),
+      ...filteredRows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
     ].join("\n");
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    link.download = "copilot-usage.csv";
-    link.click();
-    URL.revokeObjectURL(link.href);
+    download(csv, "copilot-usage.csv");
   }
 
+  const railItems: RailItem[] = [
+    ...VIEWS.map((item) => ({ ...item, onSelect: () => showView(item.id) })),
+    { id: "github", label: "GitHub metrics", short: "GitHub", icon: GitBranch, href: "/github-metrics" },
+  ];
+
+  const sections: CommandSection[] = [
+    {
+      heading: "Views",
+      items: [
+        ...VIEWS.map((item) => ({ id: item.id, label: item.label, icon: item.icon, run: () => showView(item.id) })),
+        { id: "github", label: "GitHub metrics", icon: GitBranch, run: () => router.push("/github-metrics") },
+      ],
+    },
+    {
+      heading: "Agents",
+      items: agentNames.map((name) => ({
+        id: name,
+        label: name,
+        icon: Bot,
+        hint: "Agent",
+        run: () => {
+          showView("agents");
+          setSelectedAgent(name);
+          setSelectedUser("all");
+          setSelectedModel("all");
+          setSearch("");
+        },
+      })),
+    },
+    {
+      heading: "Users",
+      items: userNames.map((name) => ({
+        id: name,
+        label: name,
+        icon: Users,
+        hint: "User",
+        run: () => {
+          showView("users");
+          setSelectedUser(name);
+          setSelectedAgent("all");
+          setSelectedModel("all");
+          setSearch("");
+        },
+      })),
+    },
+    {
+      heading: "Models",
+      items: modelNames.map((name) => ({
+        id: name,
+        label: name,
+        icon: Cpu,
+        hint: "Model",
+        run: () => {
+          showView("models");
+          setSelectedModel(name);
+        },
+      })),
+    },
+    {
+      heading: "Actions",
+      items: [
+        { id: "refresh", label: "Refresh data", icon: RefreshCw, run: () => setRefreshKey((key) => key + 1) },
+        {
+          id: "theme",
+          label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
+          icon: theme === "dark" ? Sun : Moon,
+          run: toggleTheme,
+        },
+        {
+          id: "auto-refresh",
+          label: autoRefresh ? "Pause auto-refresh" : "Resume auto-refresh",
+          icon: RefreshCw,
+          run: () => setAutoRefresh((value) => !value),
+        },
+        { id: "export", label: "Export CSV", icon: Download, run: exportCsv },
+        { id: "clear", label: "Clear filters", icon: X, run: clearFilters },
+      ],
+    },
+  ];
+
+  const viewLabel = VIEWS.find((item) => item.id === view)?.label ?? "Overview";
+  const scope = selectedUser === "all" ? "Team workspace" : selectedUser;
+  const freshness = error
+    ? updatedAt
+      ? `Couldn’t refresh · last good ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "Receiver unreachable"
+    : updatedAt
+      ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "Connecting";
+  const lead = findings[0];
+  const resultCount = view === "activity" ? filteredEvents.length : totals.requests;
+
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <a className="brand" href="#overview" onClick={() => setView("overview")}>
-          <span className="brand-mark"><Command size={19} strokeWidth={2.4} /></span>
-          <span className="brand-copy"><strong>Agent Command</strong><small>CENTER</small></span>
-        </a>
-
-        <div className="workspace-label">WORKSPACE</div>
-        <div className="workspace-switcher">
-          <span className="workspace-avatar">A</span>
-          <span className="workspace-name"><strong>Team workspace</strong><small>Copilot usage</small></span>
-        </div>
-
-        <div className="nav-label">ANALYTICS</div>
-        <nav className="primary-nav" aria-label="Dashboard sections">
-          {navigation.map(({ id, label, icon: Icon }) => (
-            <button
-              className={`nav-item ${view === id ? "active" : ""}`}
-              aria-label={label}
-              title={label}
-              key={id}
-              onClick={() => setView(id)}
-              type="button"
-            >
-              <Icon size={18} strokeWidth={1.8} />
-              <span>{label}</span>
-              {id === "agents" && <span className="nav-count">{catalog?.agents.length ?? 0}</span>}
-              {id === "users" && <span className="nav-count">{userNames.length}</span>}
+    <>
+      <BootLoader visible={booting} stages={stages} />
+      <div className="app" inert={booting}>
+        <Rail
+          items={railItems}
+          active={view}
+          utilities={[
+            { id: "search", label: "Search", tip: "Search  ⌘K", icon: CommandIcon, onSelect: () => setPaletteOpen(true) },
+            {
+              id: "theme",
+              label: theme === "dark" ? "Light mode" : "Dark mode",
+              icon: theme === "dark" ? Sun : Moon,
+              onSelect: toggleTheme,
+            },
+            { id: "docs", label: "API reference", icon: BookOpen, href: `${API_BASE}/docs` },
+          ]}
+        />
+        <main className="canvas" id="main">
+          <div className="mobile-bar">
+            <RidgeMark size={22} />
+            <strong>Agent Command Center</strong>
+            <button className="icon-button" type="button" aria-label="Search" onClick={() => setPaletteOpen(true)}>
+              <Search size={16} aria-hidden="true" />
             </button>
-          ))}
-          <Link className="nav-item github-nav-link" href="/github-metrics" aria-label="GitHub Metrics" title="GitHub Metrics">
-            <GitBranch size={18} strokeWidth={1.8} /><span>GitHub Metrics</span>
-          </Link>
-        </nav>
-
-        <div className="sidebar-bottom">
-          <div className="source-card">
-            <div className="source-card-top"><span className="source-pulse" /> RECEIVER</div>
-            <strong>{error ? "Connection issue" : updatedAt ? "Live backend" : "Connecting"}</strong>
-            <small>{API_BASE.replace(/^https?:\/\//, "")}</small>
-          </div>
-          <a className="help-link" href={`${API_BASE}/docs`} target="_blank" rel="noreferrer">
-            <CircleHelp size={16} /> API reference <ArrowUpRight size={13} />
-          </a>
-          <div className="sidebar-foot"><span>COPILOT OBSERVABILITY</span></div>
-        </div>
-      </aside>
-
-      <section className="main-panel">
-        <header className="topbar">
-          <button className="command-search" onClick={() => { setCommandQuery(""); setPaletteOpen(true); }} type="button" aria-label="Open command search">
-            <Search size={17} /><span>Search agents, users, pages...</span><Command size={13} />
-          </button>
-          <div className="topbar-actions">
-            <span className="updated-label">{updatedAt ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span>
-            <span className={`connection-status ${error ? "offline" : ""}`}>
-              <span className="status-dot" /> {error ? "API issue" : updatedAt ? "Live data" : "Connecting"}
-            </span>
             <button
-              className="icon-button refresh-button"
-              onClick={() => setRefreshKey((key) => key + 1)}
-              title="Refresh data"
-              aria-label="Refresh data"
+              className="icon-button"
               type="button"
-              disabled={refreshing}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              onClick={toggleTheme}
             >
-              <RefreshCw size={16} className={refreshing ? "spin" : ""} />
-            </button>
-            <button className="icon-button" onClick={toggleTheme} type="button" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
             </button>
           </div>
-        </header>
 
-        <div className="content-wrap">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow"><Sparkles size={13} /> COPILOT TELEMETRY</div>
-              <h1>{activeLabel}</h1>
-              <p>{selectedUser === "all" ? "Team workspace" : selectedUser} / Last {period} days</p>
+          <header className="title-row">
+            <div className="title-block">
+              <h1>{viewLabel}</h1>
+              <p className="title-meta">
+                <span>{scope}</span>
+                <span aria-hidden="true">·</span>
+                <span>last {period} days</span>
+                <span aria-hidden="true">·</span>
+                <span className="freshness" data-state={error ? "error" : updatedAt ? "ok" : "pending"}>
+                  <i aria-hidden="true" />
+                  {freshness}
+                </span>
+              </p>
+              {view === "overview" && lead && (
+                <p className="title-finding">
+                  <span className="num">
+                    {lead.figure}
+                    {lead.unit === "%" ? "%" : ` ${lead.unit ?? ""}`}
+                  </span>{" "}
+                  {lead.text}
+                </p>
+              )}
             </div>
-            <div className="heading-meta">
-              <div className="period-control" role="group" aria-label="Date range">
-                {([7, 30, 90] as Period[]).map((days) => (
-                  <button
-                    className={period === days ? "selected" : ""}
-                    aria-pressed={period === days}
-                    key={days}
-                    onClick={() => setPeriod(days)}
-                    type="button"
-                  >
-                    {days}D
-                  </button>
-                ))}
-              </div>
-              <button className="export-button" onClick={exportCsv} type="button" disabled={!filteredRows.length}>
-                <ArrowDownToLine size={15} /> <span>Export</span>
+            <div className="title-actions">
+              <Segmented
+                id="period-line"
+                label="Date range"
+                options={PERIODS}
+                value={period}
+                onChange={setPeriod}
+                format={(days) => `${days}d`}
+              />
+              <button className="toggle" type="button" aria-pressed={autoRefresh} onClick={() => setAutoRefresh((value) => !value)}>
+                Auto-refresh
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                title="Refresh data"
+                aria-label="Refresh data"
+                disabled={refreshing}
+                onClick={() => setRefreshKey((key) => key + 1)}
+              >
+                <RefreshCw size={15} className={refreshing ? "spin" : undefined} aria-hidden="true" />
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={view === "activity" ? !filteredEvents.length : !filteredRows.length}
+                onClick={exportCsv}
+              >
+                <ArrowDownToLine size={14} aria-hidden="true" />
+                <span className="button-label">Export CSV</span>
               </button>
             </div>
-          </div>
+          </header>
+
+          <section className="toolbar" aria-label="Filters">
+            <label className="search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                ref={searchRef}
+                aria-label="Search usage"
+                placeholder="Search date, user, agent, model"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+              {search ? (
+                <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setSearch("")}>
+                  <X size={13} aria-hidden="true" />
+                </button>
+              ) : (
+                <kbd>/</kbd>
+              )}
+            </label>
+            <div className="toolbar-selects">
+              <FilterSelect label="Filter by user" allLabel="All users" value={selectedUser} options={userNames} onChange={setSelectedUser} icon={Users} />
+              <FilterSelect label="Filter by agent" allLabel="All agents" value={selectedAgent} options={agentNames} onChange={setSelectedAgent} icon={Bot} />
+              <FilterSelect label="Filter by model" allLabel="All models" value={selectedModel} options={modelNames} onChange={setSelectedModel} icon={Cpu} />
+            </div>
+            <div className="toolbar-end">
+              <span className="muted">
+                <span className="num">{formatCount(resultCount)}</span> {resultCount === 1 ? "call" : "calls"}
+              </span>
+              {filtersActive && (
+                <button className="text-button" type="button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+          </section>
 
           {error && (
-            <div className="error-banner" role="alert">
-              <ShieldAlert size={17} />
-              <div><strong>Can’t reach the usage API</strong><span>{error}</span></div>
-              <button onClick={() => setRefreshKey((key) => key + 1)} type="button">Retry</button>
+            <div className="notice is-negative" role="alert">
+              <TriangleAlert size={15} aria-hidden="true" />
+              <span>
+                Couldn’t load usage from {API_HOST}.{" "}
+                {updatedAt
+                  ? `Showing data from ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+                  : "Nothing has loaded yet."}{" "}
+                <span className="muted">{error}</span>
+              </span>
+              <button className="text-button" type="button" onClick={() => setRefreshKey((key) => key + 1)}>
+                Retry
+              </button>
+            </div>
+          )}
+          {catalog?.stale && (
+            <div className="notice is-warning" role="status">
+              <TriangleAlert size={15} aria-hidden="true" />
+              <span>Showing the last saved agent catalog; its refresh failed.</span>
             </div>
           )}
 
-          {catalog?.stale && (
-            <div className="stale-banner"><Clock3 size={15} /> Showing the last saved agent catalog; its refresh failed.</div>
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={view}
+              className="view"
+              initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {view === "overview" && (
+                <>
+                  <LiveStrip users={liveUsers} now={now} hues={hues} loading={loading} />
+                  <section className="kpis" aria-label={`Totals for the last ${period} days. Calls, tokens and cost also choose the chart metric.`}>
+                    <KpiCell label="Calls" metric="calls" selected={metric} onSelect={setMetric} note={`${formatCount(new Set(filteredRows.map((row) => row.agent)).size)} agents · ${formatCount(new Set(filteredRows.map((row) => row.model)).size)} models`}>
+                      <NumberFlow value={totals.requests} locales="en-US" />
+                    </KpiCell>
+                    <KpiCell label="Tokens" metric="tokens" selected={metric} onSelect={setMetric} note={`${formatCompact(totals.input)} in · ${formatCompact(totals.output)} out`}>
+                      <NumberFlow value={totals.input + totals.output} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
+                    </KpiCell>
+                    <KpiCell
+                      label="Est. cost"
+                      metric="cost"
+                      selected={metric}
+                      onSelect={setMetric}
+                      note={
+                        totals.unpriced ? (
+                          <span className="pill is-warning">{formatCount(totals.unpriced)} unpriced</span>
+                        ) : totals.input + totals.output ? (
+                          `${formatMoney((totals.cost / (totals.input + totals.output)) * 1000, currency, 4)} per 1k tokens`
+                        ) : (
+                          "No priced calls"
+                        )
+                      }
+                    >
+                      <NumberFlow value={totals.cost} locales="en-US" format={{ style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                    </KpiCell>
+                    <KpiCell label="Users" note={`${formatCount(liveUsers.length)} live now`}>
+                      <NumberFlow value={activeUsers} locales="en-US" />
+                    </KpiCell>
+                    <KpiCell label="Median latency" note={latency.p95 ? `p95 ${formatSeconds(latency.p95)}` : "No latency recorded"}>
+                      {latency.median ? (
+                        <>
+                          <NumberFlow value={latency.median / 1000} locales="en-US" format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                          <span className="unit">s</span>
+                        </>
+                      ) : (
+                        <span className="dash">—</span>
+                      )}
+                    </KpiCell>
+                  </section>
 
-          <section className="filter-row" aria-label="Usage filters">
-            <label className="search-field">
-              <Search size={16} />
-              <input
-                aria-label="Search usage"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search date, user, agent, model"
-                ref={searchRef}
-                value={search}
-              />
-            </label>
-            <label className="select-filter">
-              <Users size={15} />
-              <select aria-label="Filter by user" onChange={(event) => setSelectedUser(event.target.value)} value={selectedUser}>
-                <option value="all">All users</option>
-                {userNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-              <ChevronDown size={14} />
-            </label>
-            <label className="select-filter">
-              <Bot size={15} />
-              <select aria-label="Filter by agent" onChange={(event) => setSelectedAgent(event.target.value)} value={selectedAgent}>
-                <option value="all">All agents</option>
-                {agentNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-              <ChevronDown size={14} />
-            </label>
-            <label className="select-filter model-filter">
-              <Cpu size={15} />
-              <select aria-label="Filter by model" onChange={(event) => setSelectedModel(event.target.value)} value={selectedModel}>
-                <option value="all">All models</option>
-                {modelNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-              <ChevronDown size={14} />
-            </label>
-            <label className="auto-refresh-control">
-              <input checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} type="checkbox" />
-              <span className="toggle-track"><span /></span>
-              <span>Auto-refresh</span>
-            </label>
-          </section>
+                  <OverviewCharts
+                    days={days}
+                    rows={filteredRows}
+                    events={filteredEvents}
+                    metric={metric}
+                    currency={currency}
+                    today={today ?? ""}
+                    onOpenDay={openDay}
+                  />
 
-          {view === "overview" && (
-            <>
-              <LiveUsers users={liveUsers} now={now} loading={loading} />
-              <section className="metric-grid" aria-label="Usage totals">
-                <article className="metric-card metric-highlight">
-                  <div className="metric-label">AGENT CALLS <Zap size={14} /></div>
-                  <div className="metric-value">{loading ? "—" : formatCount(totals.requests)}</div>
-                  <div className="metric-foot"><span className="metric-mark lime-mark" /> requests in the current results</div>
-                </article>
-                <article className="metric-card">
-                  <div className="metric-label">TOTAL TOKENS <Boxes size={14} /></div>
-                  <div className="metric-value">{loading ? "—" : formatCompact(totals.input + totals.output)}</div>
-                  <div className="metric-foot"><span className="metric-mark blue-mark" /> {formatCompact(totals.input)} in <span className="metric-separator">/</span> {formatCompact(totals.output)} out</div>
-                </article>
-                <article className="metric-card">
-                  <div className="metric-label">ACTIVE USERS <Users size={14} /></div>
-                  <div className="metric-value">{loading ? "—" : formatCount(activeUsers)}</div>
-                  <div className="metric-foot">Known users in the current results</div>
-                </article>
-                <article className="metric-card">
-                  <div className="metric-label">MODELS USED <Cpu size={14} /></div>
-                  <div className="metric-value">{loading ? "—" : formatCount(modelsUsed)}</div>
-                  <div className="metric-foot">Distinct models in the current results</div>
-                </article>
-              </section>
+                  <Carousel
+                    label="Findings"
+                    heading={
+                      <>
+                        <h2>Findings</h2>
+                        <p>
+                          {findings.length
+                            ? `${findings.length} facts from ${rangeLabel}, strongest first`
+                            : `Facts appear once calls are recorded in ${rangeLabel}`}
+                        </p>
+                      </>
+                    }
+                  >
+                    {findings.map((finding) => (
+                      <FindingCard key={finding.id} finding={finding} onAct={() => applyFinding(finding)} />
+                    ))}
+                  </Carousel>
 
-              <section className="overview-grid">
-                <article className="panel trend-panel">
-                  <div className="panel-heading">
-                    <div><div className="section-kicker">ACTIVITY</div><h2>Token consumption</h2></div>
-                    <div className="chart-legend"><span><i className="legend-input" /> Input</span><span><i className="legend-output" /> Output</span></div>
+                  <div className="pair">
+                    <ShareList
+                      title="Models"
+                      note="Share of tokens"
+                      shares={modelShares}
+                      value={(share) => share.tokens}
+                      format={(value) => formatCompact(value)}
+                      unit="tokens"
+                      onOpen={() => showView("models")}
+                      onPick={(name) => setSelectedModel(name)}
+                    />
+                    <ShareList
+                      title="Agents"
+                      note="Share of calls"
+                      shares={groupShares(filteredRows, "agent")}
+                      value={(share) => share.calls}
+                      format={(value) => formatCount(value)}
+                      unit="calls"
+                      onOpen={() => showView("agents")}
+                      onPick={(name) => setSelectedAgent(name)}
+                    />
                   </div>
-                  {dailySeries.length ? (
-                    <div className="chart-frame">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={dailySeries} margin={{ top: 12, right: 8, left: -12, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="inputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5488e8" stopOpacity={0.22} /><stop offset="100%" stopColor="#5488e8" stopOpacity={0} /></linearGradient>
-                            <linearGradient id="outputFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#df7057" stopOpacity={0.19} /><stop offset="100%" stopColor="#df7057" stopOpacity={0} /></linearGradient>
-                          </defs>
-                          <CartesianGrid stroke="var(--line)" vertical={false} />
-                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} minTickGap={24} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fill: "#858a84", fontSize: 11 }} tickFormatter={formatCompact} />
-                          <Tooltip contentStyle={{ background: "var(--surface)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 6 }} formatter={(value, name) => [formatCount(Number(value)), name === "input" ? "Input tokens" : "Output tokens"]} labelStyle={{ color: "var(--ink)", fontWeight: 700 }} />
-                          <Area type="monotone" dataKey="input" name="input" stroke="#5488e8" strokeWidth={2.2} fill="url(#inputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
-                          <Area type="monotone" dataKey="output" name="output" stroke="#df7057" strokeWidth={2.2} fill="url(#outputFill)" activeDot={{ r: 4, strokeWidth: 0 }} />
-                        </AreaChart>
-                      </ResponsiveContainer>
+
+                  <RecentCalls events={filteredEvents} hues={hues} currency={currency} now={now} onViewAll={() => showView("activity")} />
+                </>
+              )}
+
+              {view === "agents" && (
+                <section className="block">
+                  <header className="block-head">
+                    <div className="block-title">
+                      <h2>Agents and skill packages</h2>
+                      <p>Marketplace inventory matched to recorded usage</p>
                     </div>
-                  ) : <EmptyState loading={loading} label="No token activity in this date range." />}
-                  <div className="chart-bottomline"><span><i className="dot-blue" /> {formatCount(totals.input)} input tokens</span><span><i className="dot-coral" /> {formatCount(totals.output)} output tokens</span><span className="chart-period">{period}-DAY WINDOW</span></div>
-                </article>
+                    <span className="muted">
+                      <span className="num">{formatCount(catalog?.agents.length ?? 0)}</span> listed
+                    </span>
+                  </header>
+                  <CatalogTable agents={catalog?.agents ?? []} usage={filteredRows} currency={currency} />
+                  {!!catalog?.error && <p className="table-note">Catalog refresh issue: {catalog.error}</p>}
+                </section>
+              )}
 
-                <article className="panel model-panel">
-                  <div className="panel-heading"><div><div className="section-kicker">DISTRIBUTION</div><h2>Model mix</h2></div><button className="text-link" onClick={() => setView("models")} type="button">View all <ArrowUpRight size={13} /></button></div>
-                  {modelRows.length ? (
-                    <div className="model-list">
-                      {modelRows.slice(0, 5).map((model, index) => (
-                        <div className="model-row" key={model.model}>
-                          <div className={`model-index model-index-${index % 4}`}>{String(index + 1).padStart(2, "0")}</div>
-                          <div className="model-details"><div className="model-name-line"><strong title={model.model}>{model.model}</strong><span>{formatCompact(model.tokens)}</span></div><div className="model-bar"><span style={{ width: `${Math.max(4, (model.tokens / (modelRows[0]?.tokens || 1)) * 100)}%` }} /></div></div>
-                        </div>
-                      ))}
+              {view === "users" && (
+                <section className="block">
+                  <header className="block-head">
+                    <div className="block-title">
+                      <h2>Usage by user</h2>
+                      <p>Calls, tokens and estimated cost per person</p>
                     </div>
-                  ) : <EmptyState loading={loading} label="Model usage appears here." />}
-                  <div className="model-panel-footer"><span>{modelRows.length} MODELS IN RANGE</span><span>{formatMoney(totals.cost, currency)} TOTAL</span></div>
-                </article>
-              </section>
+                    <span className="muted">
+                      <span className="num">{formatCount(userNames.length)}</span> users ·{" "}
+                      <span className="num">{formatCount(liveUsers.length)}</span> live
+                    </span>
+                  </header>
+                  <UserTable rows={filteredRows} currency={currency} liveUsers={liveUsers} now={now} hues={hues} />
+                </section>
+              )}
 
-              <UsageHeatmap rows={filteredRows} period={period} endDate={updatedAt?.toISOString().slice(0, 10) ?? null} onSelect={(date) => { setSearch(date); setView("activity"); }} />
-              <section className="panel bottom-panel">
-                <div className="panel-heading bottom-panel-heading">
-                  <div><div className="section-kicker">WORKLOAD</div><h2>Agent activity</h2></div>
-                  <button className="text-link" onClick={() => setView("agents")} type="button">All agents <ArrowUpRight size={13} /></button>
-                </div>
-                <AgentTable agents={catalog?.agents || []} usage={filteredRows} currency={currency} compact />
-              </section>
-              <RecentActivity events={filteredEvents} rows={filteredRows} onViewAll={() => setView("activity")} />
-            </>
-          )}
+              {view === "models" && (
+                <section className="block">
+                  <header className="block-head">
+                    <div className="block-title">
+                      <h2>Usage by model</h2>
+                      <p>Share is each model’s part of all tokens in range</p>
+                    </div>
+                    <span className="muted">
+                      <span className="num">{formatCount(modelShares.length)}</span> models
+                    </span>
+                  </header>
+                  <ModelTable shares={modelShares} totals={totals} currency={currency} loading={loading} />
+                </section>
+              )}
 
-          {view === "agents" && (
-            <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">MARKETPLACE INVENTORY</div><h2>Agents, skill packages, and tracked usage</h2></div><span className="inventory-count">{catalog?.agents.length ?? 0} ITEMS LISTED</span></div>
-              <AgentTable agents={catalog?.agents || []} usage={filteredRows} currency={currency} />
-              {!!catalog?.error && <p className="table-note">Catalog refresh issue: {catalog.error}</p>}
-            </section>
-          )}
+              {view === "activity" && (
+                <ActivityTable events={filteredEvents} loading={loading} currency={currency} hues={hues} />
+              )}
+            </motion.div>
+          </AnimatePresence>
 
-          {view === "users" && (
-            <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">TEAM USAGE</div><h2>Usage by user</h2></div><span className="inventory-count">{userNames.length} USERS · {liveUsers.length} LIVE</span></div>
-              <UserTable rows={filteredRows} currency={currency} liveUsers={liveUsers} now={now} />
-            </section>
-          )}
-
-          {view === "models" && (
-            <section className="panel full-panel">
-              <div className="panel-heading"><div><div className="section-kicker">MODEL PERFORMANCE</div><h2>Usage by model</h2></div><span className="inventory-count">{modelRows.length} MODELS</span></div>
-              <ModelTable rows={modelRows} totals={totals} currency={currency} loading={loading} />
-            </section>
-          )}
-
-          {view === "activity" && <ActivityTable events={filteredEvents} loading={loading} currency={currency} />}
-
-          <footer className="page-footer"><span><span className="footer-status" /> RECEIVER {error ? "UNAVAILABLE" : "OPERATIONAL"}</span><span>{updatedAt ? `LAST SYNC ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "WAITING FOR DATA"}</span></footer>
-        </div>
-      </section>
-      <dialog ref={paletteRef} className="command-dialog" onCancel={() => setPaletteOpen(false)} onClick={(event) => { if (event.target === event.currentTarget) setPaletteOpen(false); }} aria-label="Command search">
-        <div className="command-dialog-inner">
-          <div className="command-input-row"><Search size={19} /><input autoFocus aria-label="Search commands" placeholder="Search agents, users, pages..." value={commandQuery} onChange={(event) => setCommandQuery(event.target.value)} onKeyDown={(event) => {
-            if (event.key === "Enter" && commands[0]) { event.preventDefault(); runCommand(commands[0]); }
-            if (event.key === "ArrowDown") { event.preventDefault(); paletteRef.current?.querySelector<HTMLButtonElement>(".command-result")?.focus(); }
-          }} /><button type="button" className="icon-button" title="Close search" aria-label="Close search" onClick={() => setPaletteOpen(false)}><X size={17} /></button></div>
-          <div className="command-results" onKeyDown={(event) => {
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-            event.preventDefault();
-            const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(".command-result"));
-            const currentIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
-            buttons[(currentIndex + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
-          }}>
-            {commands.map((command) => <button type="button" className="command-result" key={`${command.kind}-${command.label}`} onClick={() => runCommand(command)}><command.icon size={18} /><span>{command.label}</span><small>{command.kind}</small><ArrowUpRight size={14} /></button>)}
-            {!commands.length && <div className="empty-state">No matches</div>}
-          </div>
-        </div>
-      </dialog>
-    </main>
+          <footer className="status-footer">
+            <span className="freshness" data-state={error ? "error" : updatedAt ? "ok" : "pending"}>
+              <i aria-hidden="true" />
+              Receiver {error ? "unavailable" : "operational"}
+            </span>
+            <span className="num">{API_HOST}</span>
+            <a href={`${API_BASE}/docs`} target="_blank" rel="noreferrer">
+              API reference <ArrowUpRight size={12} aria-hidden="true" />
+            </a>
+          </footer>
+        </main>
+      </div>
+      {paletteOpen && <CommandMenu open onOpenChange={setPaletteOpen} sections={sections} />}
+    </>
   );
 }
 
-function UsageHeatmap({ rows, period, endDate, onSelect }: { rows: UsageRow[]; period: Period; endDate: string | null; onSelect: (date: string) => void }) {
-  if (!endDate) return null;
-  const end = Date.parse(`${endDate}T00:00:00Z`);
-  const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.date, (counts.get(row.date) || 0) + row.requests);
-  const maximum = Math.max(1, ...counts.values());
-  const start = end - (period - 1) * 86_400_000;
-  const offset = new Date(start).getUTCDay();
-  const cells = Array.from({ length: offset + period }, (_, index) => {
-    if (index < offset) return <span className="heatmap-spacer" key={`spacer-${index}`} />;
-    const date = new Date(start + (index - offset) * 86_400_000).toISOString().slice(0, 10);
-    const count = counts.get(date) || 0;
-    const level = count ? Math.max(1, Math.ceil(count / maximum * 4)) : 0;
-    return <button className={`heatmap-cell level-${level}`} key={date} type="button" title={`${date}: ${formatCount(count)} calls`} aria-label={`${date}: ${formatCount(count)} calls`} onClick={() => onSelect(date)} />;
-  });
-  return <section className="heatmap-section"><div className="panel-heading"><div><div className="section-kicker">DAILY PULSE</div><h2>Activity calendar</h2></div><span className="inventory-count">{counts.size} ACTIVE DAYS</span></div><div className="heatmap-layout"><div className="heatmap-day-labels"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div><div className="heatmap-grid">{cells}</div><div className="heatmap-summary"><strong>{formatCount(rows.reduce((total, row) => total + row.requests, 0))}</strong><span>calls / {period} days</span><div className="heatmap-legend"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`heatmap-cell level-${level}`} />)}<span>More</span></div></div></div></section>;
+function KpiCell({
+  label,
+  metric,
+  selected,
+  onSelect,
+  note,
+  children,
+}: {
+  label: string;
+  metric?: Metric;
+  selected?: Metric;
+  onSelect?: (metric: Metric) => void;
+  note: ReactNode;
+  children: ReactNode;
+}) {
+  const isSelected = metric !== undefined && metric === selected;
+  const body = (
+    <>
+      <span className="kpi-label">
+        {label}
+        {isSelected && (
+          <motion.span className="select-line kpi-line" layoutId="kpi-line" transition={{ type: "spring", stiffness: 560, damping: 44 }} />
+        )}
+      </span>
+      <span className="kpi-value num">{children}</span>
+      <span className="kpi-note">{note}</span>
+    </>
+  );
+  return metric && onSelect ? (
+    <button className="kpi" type="button" aria-pressed={isSelected} onClick={() => onSelect(metric)}>
+      {body}
+    </button>
+  ) : (
+    <div className="kpi">{body}</div>
+  );
 }
 
-function EmptyState({ loading, label }: { loading: boolean; label: string }) {
-  return <div className="empty-state">{loading ? <LoaderCircle className="spin" size={18} /> : <span className="empty-dash">—</span>}<span>{loading ? "Loading usage" : label}</span></div>;
+function LiveStrip({
+  users,
+  now,
+  hues,
+  loading,
+}: {
+  users: LiveUser[];
+  now: number;
+  hues: Map<string, number>;
+  loading: boolean;
+}) {
+  return (
+    <section className="live" aria-label="Users active in the last 5 minutes">
+      <span className="freshness" data-state={users.length ? "live" : "idle"}>
+        <i aria-hidden="true" />
+        {loading
+          ? "Checking for live users"
+          : users.length
+            ? `${formatCount(users.length)} ${users.length === 1 ? "user" : "users"} active in the last 5 minutes`
+            : "No Copilot calls in the last 5 minutes"}
+      </span>
+      {users.length > 0 && (
+        <ul className="live-list">
+          {users.map((item) => (
+            <li key={item.user}>
+              <Person name={item.user} hue={hues.get(item.user)}>
+                <time className="muted" dateTime={new Date(item.lastSeen).toISOString()}>
+                  {formatAgo(item.lastSeen, now)}
+                </time>
+              </Person>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const OverviewCharts = memo(function OverviewCharts({
+  days,
+  rows,
+  events,
+  metric,
+  currency,
+  today,
+  onOpenDay,
+}: {
+  days: string[];
+  rows: UsageRow[];
+  events: CallEvent[];
+  metric: Metric;
+  currency: string;
+  today: string;
+  onOpenDay: (date: string) => void;
+}) {
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const totals = useMemo(() => dailyTotals(rows, days, metric), [rows, days, metric]);
+  const ridge = useMemo(() => ridgeData(events, days, metric), [events, days, metric]);
+  const noun = metric === "cost" ? "Estimated cost" : metric === "tokens" ? "Tokens" : "Calls";
+
+  return (
+    <div className="chart-row">
+      <section className="block ridge-block">
+        <header className="block-head">
+          <div className="block-title">
+            <h2>Daily rhythm</h2>
+            <p>{noun} by time of day, one line per day, newest in front</p>
+          </div>
+          <span className="muted">UTC · 18-min smoothing</span>
+        </header>
+        <SignalRidge
+          data={ridge}
+          metric={metric}
+          dayTotals={totals}
+          currency={currency}
+          today={today}
+          highlightDate={hoverDate}
+          onHoverDate={setHoverDate}
+          onSelectDate={onOpenDay}
+        />
+      </section>
+      <section className="block bars-block">
+        <header className="block-head">
+          <div className="block-title">
+            <h2>{noun} per day</h2>
+            <p>Receiver days, same filters as above</p>
+          </div>
+        </header>
+        <DailyBars
+          days={days}
+          values={totals}
+          metric={metric}
+          currency={currency}
+          highlight={hoverDate}
+          onHover={setHoverDate}
+          onSelect={onOpenDay}
+        />
+      </section>
+    </div>
+  );
+});
+
+function FindingCard({ finding, onAct }: { finding: Finding; onAct: () => void }) {
+  return (
+    <article className="finding">
+      <p className="finding-label">{finding.label}</p>
+      <p className="finding-figure num">
+        {finding.figure}
+        {finding.unit && <span className="unit">{finding.unit}</span>}
+      </p>
+      <p className="finding-text">{finding.text}</p>
+      {finding.action && (
+        <button className="text-button finding-action" type="button" onClick={onAct}>
+          {finding.action.label} <ArrowUpRight size={13} aria-hidden="true" />
+        </button>
+      )}
+    </article>
+  );
+}
+
+function ShareList({
+  title,
+  note,
+  shares,
+  value,
+  format,
+  unit,
+  onOpen,
+  onPick,
+}: {
+  title: string;
+  note: string;
+  shares: Share[];
+  value: (share: Share) => number;
+  format: (value: number) => string;
+  unit: string;
+  onOpen: () => void;
+  onPick: (name: string) => void;
+}) {
+  const sorted = [...shares].sort((a, b) => value(b) - value(a));
+  const total = sorted.reduce((sum, share) => sum + value(share), 0);
+  const top = sorted.slice(0, 5);
+  const largest = top[0] ? value(top[0]) : 0;
+  return (
+    <section className="block">
+      <header className="block-head">
+        <div className="block-title">
+          <h2>{title}</h2>
+          <p>
+            {note} · {formatCount(sorted.length)} in range
+          </p>
+        </div>
+        <button className="text-button" type="button" onClick={onOpen}>
+          View all <ArrowUpRight size={13} aria-hidden="true" />
+        </button>
+      </header>
+      {top.length ? (
+        <div className="share">
+          <div className="share-head" aria-hidden="true">
+            <span>Name</span>
+            <span className="num">Share</span>
+            <span className="num">{unit[0].toUpperCase() + unit.slice(1)}</span>
+          </div>
+          <ol className="share-rows">
+            {top.map((share) => (
+              <li key={share.name} style={{ "--fill": largest ? value(share) / largest : 0 } as CSSProperties}>
+                <button type="button" className="share-name" title={`Filter to ${share.name}`} onClick={() => onPick(share.name)}>
+                  {share.name}
+                </button>
+                <span className="num muted">{formatPercent(total ? (value(share) / total) * 100 : 0)}</span>
+                <span className="num">{format(value(share))}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : (
+        <Empty>No {unit} in this range.</Empty>
+      )}
+    </section>
+  );
+}
+
+function RecentCalls({
+  events,
+  hues,
+  currency,
+  now,
+  onViewAll,
+}: {
+  events: CallEvent[];
+  hues: Map<string, number>;
+  currency: string;
+  now: number;
+  onViewAll: () => void;
+}) {
+  const recent = [...events]
+    .sort((a, b) => Date.parse(b.timestamp || b.date) - Date.parse(a.timestamp || a.date))
+    .slice(0, 5);
+  return (
+    <section className="block">
+      <header className="block-head">
+        <div className="block-title">
+          <h2>Recent calls</h2>
+          <p>Latest recorded model calls, newest first</p>
+        </div>
+        <button className="text-button" type="button" onClick={onViewAll}>
+          Full activity <ArrowUpRight size={13} aria-hidden="true" />
+        </button>
+      </header>
+      {recent.length ? (
+        <div className="table-frame">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Agent</th>
+                <th>Model</th>
+                <th className="num">Tokens</th>
+                <th className="num">Latency</th>
+                <th className="num">Est. cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((call, index) => {
+                const time = Date.parse(call.timestamp);
+                return (
+                  <tr key={`${call.key}-${index}`}>
+                    <td className="num muted nowrap">
+                      <time dateTime={call.timestamp} title={displayCallTime(call.timestamp)}>
+                        {Number.isNaN(time)
+                          ? "Time unavailable"
+                          : now && now - time < 3_600_000
+                            ? formatAgo(time, now)
+                            : new Date(time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                      </time>
+                    </td>
+                    <td>
+                      <Person name={call.user} hue={hues.get(call.user)} />
+                    </td>
+                    <td className="ellipsis" title={call.agent}>{call.agent}</td>
+                    <td className="ellipsis muted" title={call.model}>{call.model}</td>
+                    <td className="num">{formatCount((call.input_tokens || 0) + (call.output_tokens || 0))}</td>
+                    <td className="num muted">{formatSeconds(call.latency_ms)}</td>
+                    <td className="num">{formatMoney(call.cost, currency, 4)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty>No calls match these filters.</Empty>
+      )}
+    </section>
+  );
+}
+
+function ShareBar({ share }: { share: number }) {
+  return (
+    <span className="share-cell">
+      <span className="share-track" aria-hidden="true">
+        <span style={{ width: `${Math.min(100, share)}%` }} />
+      </span>
+      <span className="num">{formatPercent(share)}</span>
+    </span>
+  );
 }
 
 function ModelTable({
-  rows,
+  shares,
   totals,
   currency,
   loading,
 }: {
-  rows: { model: string; calls: number; tokens: number; cost: number }[];
-  totals: { input: number; output: number };
+  shares: Share[];
+  totals: Totals;
   currency: string;
   loading: boolean;
 }) {
-  type ModelSortKey = "model" | "calls" | "tokens" | "cost" | "share";
-  const [sort, setSort] = useState<{ key: ModelSortKey; direction: "asc" | "desc" }>({
-    key: "tokens",
-    direction: "desc",
-  });
-
+  type Key = "name" | "calls" | "tokens" | "cost" | "share";
+  const [sort, onSort] = useSort<Key>({ key: "tokens", direction: "desc" }, ["name"]);
   const totalTokens = totals.input + totals.output;
-  const modelItems = rows.map((m) => ({
-    ...m,
-    share: totalTokens ? (m.tokens / totalTokens) * 100 : 0,
-  }));
-
-  const sortedModels = [...modelItems].sort((a, b) => {
-    const left = a[sort.key];
-    const right = b[sort.key];
-    const result =
-      typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right));
+  const items = shares.map((share) => ({ ...share, share: totalTokens ? (share.tokens / totalTokens) * 100 : 0 }));
+  const sorted = [...items].sort((a, b) => {
+    const result = compareValues(a[sort.key], b[sort.key]);
     return sort.direction === "asc" ? result : -result;
   });
-
-  const sortHeader = (key: ModelSortKey, label: string) => (
-    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        className="activity-sort-button"
-        onClick={() =>
-          setSort((current) => ({
-            key,
-            direction:
-              current.key === key
-                ? current.direction === "asc"
-                  ? "desc"
-                  : "asc"
-                : key === "model"
-                ? "asc"
-                : "desc",
-          }))
-        }
-        type="button"
-      >
-        {label}
-        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-      </button>
-    </th>
-  );
-
   return (
-    <div className="table-scroll">
-      <table className="data-table">
+    <div className="table-frame">
+      <table className="table">
         <thead>
           <tr>
-            {sortHeader("model", "MODEL")}
-            {sortHeader("calls", "CALLS")}
-            {sortHeader("tokens", "TOKENS")}
-            {sortHeader("cost", "EST. COST")}
-            {sortHeader("share", "SHARE")}
+            <SortHeader sortKey="name" label="Model" sort={sort} onSort={onSort} />
+            <SortHeader sortKey="calls" label="Calls" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="tokens" label="Tokens" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="cost" label="Est. cost" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="share" label="Share" sort={sort} onSort={onSort} numeric />
           </tr>
         </thead>
         <tbody>
-          {sortedModels.map((model) => (
-            <tr key={model.model}>
-              <td>
-                <span className="model-cell-dot" />
-                {model.model}
-              </td>
-              <td>{formatCount(model.calls)}</td>
-              <td>{formatCount(model.tokens)}</td>
-              <td>{formatMoney(model.cost, currency)}</td>
-              <td>
-                <div className="share-cell">
-                  <div className="share-bar">
-                    <span style={{ width: `${Math.min(100, model.share)}%` }} />
-                  </div>
-                  <span>{model.share.toFixed(1)}%</span>
-                </div>
+          {sorted.map((model) => (
+            <tr key={model.name}>
+              <td className="strong">{model.name}</td>
+              <td className="num">{formatCount(model.calls)}</td>
+              <td className="num">{formatCount(model.tokens)}</td>
+              <td className="num">{formatMoney(model.cost, currency)}</td>
+              <td className="num">
+                <ShareBar share={model.share} />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!rows.length && <EmptyState loading={loading} label="No model usage in this date range." />}
+      {!shares.length && <Empty>{loading ? "Loading usage…" : "No model usage in this date range."}</Empty>}
     </div>
   );
 }
 
-function AgentTable({
-  agents,
-  usage,
-  currency,
-  compact = false,
-}: {
-  agents: CatalogAgent[];
-  usage: UsageRow[];
-  currency: string;
-  compact?: boolean;
-}) {
-  type AgentSortKey = "name" | "plugin" | "requests" | "tokens" | "cost" | "status";
-  const [sort, setSort] = useState<{ key: AgentSortKey; direction: "asc" | "desc" }>({
-    key: "requests",
-    direction: "desc",
-  });
+function CatalogTable({ agents, usage, currency }: { agents: CatalogAgent[]; usage: UsageRow[]; currency: string }) {
+  type Key = "name" | "plugin" | "requests" | "tokens" | "cost" | "status";
+  const [sort, onSort] = useSort<Key>({ key: "requests", direction: "desc" }, ["name", "plugin"]);
 
-  const metrics = new Map<string, { requests: number; tokens: number; cost: number; unpriced: number }>();
+  const metrics = new Map<string, { requests: number; tokens: number; cost: number }>();
   const observedNames = new Map<string, string>();
   for (const row of usage) {
-    const agentKey = row.agent.trim().toLocaleLowerCase();
-    const current = metrics.get(agentKey) || { requests: 0, tokens: 0, cost: 0, unpriced: 0 };
+    const key = row.agent.trim().toLocaleLowerCase();
+    const current = metrics.get(key) || { requests: 0, tokens: 0, cost: 0 };
     current.requests += row.requests;
     current.tokens += row.input_tokens + row.output_tokens;
     current.cost += row.cost;
-    current.unpriced += row.unpriced_requests;
-    metrics.set(agentKey, current);
-    observedNames.set(agentKey, row.agent);
+    metrics.set(key, current);
+    observedNames.set(key, row.agent);
   }
-
   const catalogNames = new Set(
-    agents.flatMap((agent) => [agent.name, agent.id].map((name) => name.trim().toLocaleLowerCase()))
+    agents.flatMap((agent) => [agent.name, agent.id].map((name) => name.trim().toLocaleLowerCase())),
   );
-  const unlistedAgents = [...metrics.entries()]
-    .filter(([key]) => !catalogNames.has(key))
-    .sort((a, b) => b[1].requests - a[1].requests);
 
-  if (compact) {
-    const visibleAgents = agents.slice(0, 6);
-    const visibleUnlisted = unlistedAgents.slice(0, 4);
-    return (
-      <div className="table-scroll">
-        <table className="data-table agent-table">
-          <thead>
-            <tr>
-              <th>AGENT / PACKAGE</th>
-              <th>PLUGIN</th>
-              <th>CALLS</th>
-              <th>TOKENS</th>
-              <th>EST. COST</th>
-              <th>STATUS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleAgents.map((agent, index) => {
-              const isSkillPackage = agent.kind === "skill_package";
-              const key = isSkillPackage
-                ? undefined
-                : [agent.name, agent.id]
-                    .map((candidate) => candidate.trim().toLocaleLowerCase())
-                    .find((candidate) => metrics.has(candidate));
-              const measure = key ? metrics.get(key) : undefined;
-              return (
-                <tr key={`${agent.plugin_id}-${agent.id}-${index}`}>
-                  <td>
-                    <span className={`agent-avatar agent-avatar-${index % 4}`}>
-                      {isSkillPackage ? <Boxes size={16} /> : <Bot size={16} />}
-                    </span>
-                    <span className="agent-name-cell">
-                      <strong>{agent.name}</strong>
-                      <small>
-                        {isSkillPackage
-                          ? `Skill package · ${agent.skills?.length ?? 0} skills`
-                          : agent.description}
-                      </small>
-                      {isSkillPackage && !!agent.skills?.length && (
-                        <small title={agent.skills.join(", ")}>{agent.skills.join(", ")}</small>
-                      )}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="plugin-name">{agent.plugin_name || agent.plugin_id || "—"}</span>
-                    <small className="plugin-version">{agent.version ? `v${agent.version}` : ""}</small>
-                  </td>
-                  <td>{isSkillPackage ? "—" : formatCount(measure?.requests || 0)}</td>
-                  <td>{isSkillPackage ? "—" : formatCompact(measure?.tokens || 0)}</td>
-                  <td>{isSkillPackage ? "—" : formatMoney(measure?.cost || 0, currency)}</td>
-                  <td>
-                    <span
-                      className={`usage-badge ${
-                        isSkillPackage ? "unused" : measure ? "used" : "unused"
-                      }`}
-                    >
-                      <span />
-                      {isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage"}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {visibleUnlisted.map(([key, measure]) => (
-              <tr key={`tracked-${key}`}>
-                <td>
-                  <span className="agent-avatar agent-avatar-3">
-                    <Activity size={16} />
-                  </span>
-                  <span className="agent-name-cell">
-                    <strong>{observedNames.get(key) || key}</strong>
-                    <small>Observed in usage telemetry</small>
-                  </span>
-                </td>
-                <td>
-                  <span className="plugin-name">Not in marketplace</span>
-                </td>
-                <td>{formatCount(measure.requests)}</td>
-                <td>{formatCompact(measure.tokens)}</td>
-                <td>{formatMoney(measure.cost, currency)}</td>
-                <td>
-                  <span className="usage-badge used">
-                    <span />Tracked
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!visibleAgents.length && <EmptyState loading={false} label="No marketplace agents found." />}
-      </div>
-    );
-  }
-
-  type TableRow = {
+  type Row = {
     key: string;
     name: string;
+    kind: string;
     description: string;
+    skills?: string[];
     plugin: string;
     version: string;
     isSkillPackage: boolean;
-    skills?: string[];
     requests: number;
     tokens: number;
     cost: number;
-    status: string;
+    status: "Tracked" | "No usage" | "Skills only";
     statusScore: number;
-    avatarIndex: number;
-    isUnlisted: boolean;
   };
 
-  const catalogRows: TableRow[] = agents.map((agent, index) => {
+  const catalogRows: Row[] = agents.map((agent, index) => {
     const isSkillPackage = agent.kind === "skill_package";
     const metricKey = isSkillPackage
       ? undefined
-      : [agent.name, agent.id]
-          .map((candidate) => candidate.trim().toLocaleLowerCase())
-          .find((candidate) => metrics.has(candidate));
+      : [agent.name, agent.id].map((candidate) => candidate.trim().toLocaleLowerCase()).find((candidate) => metrics.has(candidate));
     const measure = metricKey ? metrics.get(metricKey) : undefined;
-    const status = isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage";
-    const statusScore = isSkillPackage ? 1 : measure ? 2 : 0;
     return {
       key: `${agent.plugin_id}-${agent.id}-${index}`,
       name: agent.name,
-      description: isSkillPackage
-        ? `Skill package · ${agent.skills?.length ?? 0} skills`
-        : agent.description,
+      kind: isSkillPackage ? "Skill package" : "Agent",
+      description: isSkillPackage ? `${agent.skills?.length ?? 0} skills` : agent.description,
+      skills: agent.skills,
       plugin: agent.plugin_name || agent.plugin_id || "—",
       version: agent.version ? `v${agent.version}` : "",
       isSkillPackage,
-      skills: agent.skills,
       requests: isSkillPackage ? 0 : measure?.requests || 0,
       tokens: isSkillPackage ? 0 : measure?.tokens || 0,
       cost: isSkillPackage ? 0 : measure?.cost || 0,
-      status,
-      statusScore,
-      avatarIndex: index % 4,
-      isUnlisted: false,
+      status: isSkillPackage ? "Skills only" : measure ? "Tracked" : "No usage",
+      statusScore: isSkillPackage ? 1 : measure ? 2 : 0,
     };
   });
-
-  const unlistedRows: TableRow[] = unlistedAgents.map(([key, measure]) => ({
-    key: `tracked-${key}`,
-    name: observedNames.get(key) || key,
-    description: "Observed in usage telemetry",
-    plugin: "Not in marketplace",
-    version: "",
-    isSkillPackage: false,
-    skills: undefined,
-    requests: measure.requests,
-    tokens: measure.tokens,
-    cost: measure.cost,
-    status: "Tracked",
-    statusScore: 2,
-    avatarIndex: 3,
-    isUnlisted: true,
-  }));
-
-  const allRows = [...catalogRows, ...unlistedRows];
-
-  const sortedRows = [...allRows].sort((a, b) => {
-    if (sort.key === "status") {
-      const result = a.statusScore - b.statusScore;
-      return sort.direction === "asc" ? result : -result;
-    }
-    const left = a[sort.key];
-    const right = b[sort.key];
+  const unlistedRows: Row[] = [...metrics.entries()]
+    .filter(([key]) => !catalogNames.has(key))
+    .map(([key, measure]) => ({
+      key: `tracked-${key}`,
+      name: observedNames.get(key) || key,
+      kind: "Telemetry only",
+      description: "Observed in usage telemetry",
+      plugin: "Not in marketplace",
+      version: "",
+      isSkillPackage: false,
+      requests: measure.requests,
+      tokens: measure.tokens,
+      cost: measure.cost,
+      status: "Tracked",
+      statusScore: 2,
+    }));
+  const rows = [...catalogRows, ...unlistedRows];
+  const sorted = [...rows].sort((a, b) => {
     const result =
-      typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right));
+      sort.key === "status" ? a.statusScore - b.statusScore : compareValues(a[sort.key], b[sort.key]);
     return sort.direction === "asc" ? result : -result;
   });
 
-  const sortHeader = (key: AgentSortKey, label: string) => (
-    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        className="activity-sort-button"
-        onClick={() =>
-          setSort((current) => ({
-            key,
-            direction:
-              current.key === key
-                ? current.direction === "asc"
-                  ? "desc"
-                  : "asc"
-                : ["name", "plugin"].includes(key)
-                ? "asc"
-                : "desc",
-          }))
-        }
-        type="button"
-      >
-        {label}
-        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-      </button>
-    </th>
-  );
-
   return (
-    <div className="table-scroll">
-      <table className="data-table agent-table">
+    <div className="table-frame">
+      <table className="table catalog-table">
         <thead>
           <tr>
-            {sortHeader("name", "AGENT / PACKAGE")}
-            {sortHeader("plugin", "PLUGIN")}
-            {sortHeader("requests", "CALLS")}
-            {sortHeader("tokens", "TOKENS")}
-            {sortHeader("cost", "EST. COST")}
-            {sortHeader("status", "STATUS")}
+            <SortHeader sortKey="name" label="Agent or package" sort={sort} onSort={onSort} />
+            <SortHeader sortKey="plugin" label="Plugin" sort={sort} onSort={onSort} />
+            <SortHeader sortKey="requests" label="Calls" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="tokens" label="Tokens" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="cost" label="Est. cost" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="status" label="Status" sort={sort} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row) => (
+          {sorted.map((row) => (
             <tr key={row.key}>
               <td>
-                <span className={`agent-avatar agent-avatar-${row.avatarIndex}`}>
-                  {row.isUnlisted ? (
-                    <Activity size={16} />
-                  ) : row.isSkillPackage ? (
-                    <Boxes size={16} />
-                  ) : (
-                    <Bot size={16} />
-                  )}
-                </span>
-                <span className="agent-name-cell">
+                <span className="stack">
                   <strong>{row.name}</strong>
-                  <small>{row.description}</small>
+                  <small title={row.description}>
+                    {row.kind} · {row.description}
+                  </small>
                   {row.isSkillPackage && !!row.skills?.length && (
                     <small title={row.skills.join(", ")}>{row.skills.join(", ")}</small>
                   )}
                 </span>
               </td>
               <td>
-                <span className="plugin-name">{row.plugin}</span>
-                {row.version && <small className="plugin-version">{row.version}</small>}
-              </td>
-              <td>{row.isSkillPackage ? "—" : formatCount(row.requests)}</td>
-              <td>{row.isSkillPackage ? "—" : formatCompact(row.tokens)}</td>
-              <td>{row.isSkillPackage ? "—" : formatMoney(row.cost, currency)}</td>
-              <td>
-                <span
-                  className={`usage-badge ${
-                    row.isSkillPackage
-                      ? "unused"
-                      : row.statusScore === 2
-                      ? "used"
-                      : "unused"
-                  }`}
-                >
-                  <span />
-                  {row.status}
+                <span className="stack">
+                  <span>{row.plugin}</span>
+                  {row.version && <small className="num">{row.version}</small>}
                 </span>
+              </td>
+              <td className="num">{row.isSkillPackage ? <span className="dash">—</span> : formatCount(row.requests)}</td>
+              <td className="num">{row.isSkillPackage ? <span className="dash">—</span> : formatCompact(row.tokens)}</td>
+              <td className="num">{row.isSkillPackage ? <span className="dash">—</span> : formatMoney(row.cost, currency)}</td>
+              <td>
+                <span className={`pill ${row.status === "Tracked" ? "is-positive" : "is-neutral"}`}>{row.status}</span>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      {!allRows.length && <EmptyState loading={false} label="No marketplace agents found." />}
+      {!rows.length && <Empty>No marketplace agents found.</Empty>}
     </div>
-  );
-}
-
-function RecentActivity({
-  events,
-  rows,
-  onViewAll,
-}: {
-  events: CallEvent[];
-  rows: UsageRow[];
-  onViewAll: () => void;
-}) {
-  const recent =
-    events.length > 0
-      ? [...events]
-          .sort((a, b) => Date.parse(b.timestamp || b.date) - Date.parse(a.timestamp || a.date))
-          .slice(0, 5)
-      : [...rows].sort(compareLatest).slice(0, 5).map((r, index) => ({
-          key: `${r.date}-${r.agent}-${r.model}-${index}`,
-          timestamp: r.last_seen || `${r.date}T00:00:00Z`,
-          user: r.user,
-          agent: r.agent,
-          model: r.model,
-          input_tokens: r.input_tokens,
-          output_tokens: r.output_tokens,
-          cost: r.cost,
-        }));
-
-  return (
-    <section className="recent-section">
-      <div className="panel-heading">
-        <div><div className="section-kicker">LATEST RECORDED</div><h2>Recent calls</h2></div>
-        <button className="text-link" onClick={onViewAll} type="button">Full activity <ArrowUpRight size={13} /></button>
-      </div>
-      {recent.length ? (
-        <div className="recent-list">
-          {recent.map((call, index) => {
-            const tokens = (call.input_tokens || 0) + (call.output_tokens || 0);
-            return (
-              <div className="recent-row" key={`${call.key}-${index}`}>
-                <span className={`recent-icon recent-icon-${index % 3}`}><Zap size={15} /></span>
-                <div className="recent-copy">
-                  <strong>{call.agent}</strong>
-                  <small>{call.model} · {call.user}</small>
-                </div>
-                <span className="recent-tokens">{formatCompact(tokens)} <small>tokens</small></span>
-                <span className="recent-cost">${(call.cost || 0).toFixed(4)}</span>
-                <time dateTime={call.timestamp} title="Call time (local time)">
-                  {call.timestamp ? displayCallTime(call.timestamp) : "Time unavailable"}
-                </time>
-              </div>
-            );
-          })}
-        </div>
-      ) : <EmptyState loading={false} label="No activity found for these filters." />}
-    </section>
-  );
-}
-
-const LIVE_WINDOW_MS = 5 * 60_000;
-
-type LiveUser = { user: string; lastSeen: number };
-
-function getLiveUsers(events: CallEvent[], now: number): LiveUser[] {
-  const latest = new Map<string, number>();
-  for (const event of events) {
-    if (event.user.trim().toLowerCase() === "unknown") continue;
-    const seen = Date.parse(event.timestamp);
-    if (Number.isNaN(seen) || now - seen > LIVE_WINDOW_MS) continue;
-    latest.set(event.user, Math.max(latest.get(event.user) ?? 0, seen));
-  }
-  return [...latest.entries()]
-    .map(([user, lastSeen]) => ({ user, lastSeen }))
-    .sort((a, b) => b.lastSeen - a.lastSeen);
-}
-
-function formatAgo(lastSeen: number, now: number) {
-  const minutes = Math.floor(Math.max(0, now - lastSeen) / 60_000);
-  return minutes < 1 ? "just now" : `${minutes} min ago`;
-}
-
-function LiveUsers({ users, now, loading }: { users: LiveUser[]; now: number; loading: boolean }) {
-  return (
-    <section className="live-users" aria-label="Users active in the last 5 minutes">
-      <div className="live-users-summary">
-        <span className={`live-dot${users.length ? " is-live" : ""}`} />
-        <strong>{loading ? "—" : formatCount(users.length)}</strong>
-        <span>{users.length === 1 ? "user" : "users"} active in the last 5 minutes</span>
-      </div>
-      {users.length ? (
-        <ul className="live-users-list">
-          {users.map((item) => (
-            <li className="live-user-chip" key={item.user}>
-              <span className="live-dot is-live" />
-              <strong>{item.user}</strong>
-              <time dateTime={new Date(item.lastSeen).toISOString()}>{formatAgo(item.lastSeen, now)}</time>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <span className="live-users-empty">{loading ? "Loading…" : "No recent Copilot calls."}</span>
-      )}
-    </section>
   );
 }
 
@@ -1264,31 +1417,20 @@ function UserTable({
   currency,
   liveUsers,
   now,
+  hues,
 }: {
   rows: UsageRow[];
   currency: string;
   liveUsers: LiveUser[];
   now: number;
+  hues: Map<string, number>;
 }) {
+  type Key = "user" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
+  const [sort, onSort] = useSort<Key>({ key: "cost", direction: "desc" }, ["user"]);
   const liveSince = new Map(liveUsers.map((item) => [item.user, item.lastSeen]));
-  type UserSortKey = "user" | "requests" | "input" | "output" | "tokens" | "cost" | "share";
-  const [sort, setSort] = useState<{ key: UserSortKey; direction: "asc" | "desc" }>({
-    key: "cost",
-    direction: "desc",
-  });
-
-  const metrics = new Map<
-    string,
-    { requests: number; input: number; output: number; cost: number; unpriced: number }
-  >();
+  const metrics = new Map<string, { requests: number; input: number; output: number; cost: number; unpriced: number }>();
   for (const row of rows) {
-    const current = metrics.get(row.user) || {
-      requests: 0,
-      input: 0,
-      output: 0,
-      cost: 0,
-      unpriced: 0,
-    };
+    const current = metrics.get(row.user) || { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0 };
     current.requests += row.requests;
     current.input += row.input_tokens;
     current.output += row.output_tokens;
@@ -1296,116 +1438,63 @@ function UserTable({
     current.unpriced += row.unpriced_requests;
     metrics.set(row.user, current);
   }
-
-  const rawUserRows = [...metrics.entries()];
-  const totalTokens = rawUserRows.reduce(
-    (total, [, measure]) => total + measure.input + measure.output,
-    0
-  );
-
-  const userItems = rawUserRows.map(([user, measure]) => {
+  const totalTokens = [...metrics.values()].reduce((total, measure) => total + measure.input + measure.output, 0);
+  const items = [...metrics.entries()].map(([user, measure]) => {
     const tokens = measure.input + measure.output;
-    const share = totalTokens ? (tokens / totalTokens) * 100 : 0;
-    return {
-      user,
-      requests: measure.requests,
-      input: measure.input,
-      output: measure.output,
-      tokens,
-      cost: measure.cost,
-      unpriced: measure.unpriced,
-      share,
-    };
+    return { user, ...measure, tokens, share: totalTokens ? (tokens / totalTokens) * 100 : 0 };
   });
-
-  const sortedUsers = [...userItems].sort((a, b) => {
-    const left = a[sort.key];
-    const right = b[sort.key];
-    const result =
-      typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right));
+  const sorted = [...items].sort((a, b) => {
+    const result = compareValues(a[sort.key], b[sort.key]);
     return sort.direction === "asc" ? result : -result;
   });
 
-  const sortHeader = (key: UserSortKey, label: string) => (
-    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        className="activity-sort-button"
-        onClick={() =>
-          setSort((current) => ({
-            key,
-            direction:
-              current.key === key
-                ? current.direction === "asc"
-                  ? "desc"
-                  : "asc"
-                : key === "user"
-                ? "asc"
-                : "desc",
-          }))
-        }
-        type="button"
-      >
-        {label}
-        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-      </button>
-    </th>
-  );
-
   return (
-    <div className="table-scroll">
-      <table className="data-table user-table">
+    <div className="table-frame">
+      <table className="table">
         <thead>
           <tr>
-            {sortHeader("user", "USER")}
-            {sortHeader("requests", "CALLS")}
-            {sortHeader("input", "INPUT TOKENS")}
-            {sortHeader("output", "OUTPUT TOKENS")}
-            {sortHeader("tokens", "TOTAL TOKENS")}
-            {sortHeader("cost", "EST. COST")}
-            {sortHeader("share", "SHARE")}
+            <SortHeader sortKey="user" label="User" sort={sort} onSort={onSort} />
+            <SortHeader sortKey="requests" label="Calls" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="input" label="Input tokens" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="output" label="Output tokens" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="tokens" label="Total tokens" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="cost" label="Est. cost" sort={sort} onSort={onSort} numeric />
+            <SortHeader sortKey="share" label="Share" sort={sort} onSort={onSort} numeric />
           </tr>
         </thead>
         <tbody>
-          {sortedUsers.map((item) => {
+          {sorted.map((item) => {
             const lastSeen = liveSince.get(item.user);
             return (
-            <tr className={lastSeen !== undefined ? "user-row-live" : undefined} key={item.user}>
-              <td>
-                {item.user}
-                {lastSeen !== undefined && (
-                  <span className="live-badge" title={`Last call ${formatAgo(lastSeen, now)}`}>
-                    <span className="live-dot is-live" /> LIVE
+              <tr key={item.user}>
+                <td>
+                  <Person name={item.user} hue={hues.get(item.user)}>
+                    {lastSeen !== undefined && (
+                      <span className="pill is-positive" title={`Last call ${formatAgo(lastSeen, now)}`}>
+                        Live
+                      </span>
+                    )}
+                  </Person>
+                </td>
+                <td className="num">{formatCount(item.requests)}</td>
+                <td className="num muted">{formatCount(item.input)}</td>
+                <td className="num muted">{formatCount(item.output)}</td>
+                <td className="num">{formatCount(item.tokens)}</td>
+                <td className="num">
+                  <span className="stack is-end">
+                    <span>{formatMoney(item.cost, currency)}</span>
+                    {item.unpriced > 0 && <small>{formatCount(item.unpriced)} unpriced</small>}
                   </span>
-                )}
-              </td>
-              <td>{formatCount(item.requests)}</td>
-              <td>{formatCount(item.input)}</td>
-              <td>{formatCount(item.output)}</td>
-              <td>{formatCount(item.tokens)}</td>
-              <td>
-                {formatMoney(item.cost, currency)}
-                {item.unpriced > 0 && (
-                  <small className="user-unpriced">
-                    {formatCount(item.unpriced)} unpriced
-                  </small>
-                )}
-              </td>
-              <td>
-                <div className="share-cell">
-                  <div className="share-bar">
-                    <span style={{ width: `${Math.min(100, item.share)}%` }} />
-                  </div>
-                  <span>{item.share.toFixed(1)}%</span>
-                </div>
-              </td>
-            </tr>
+                </td>
+                <td className="num">
+                  <ShareBar share={item.share} />
+                </td>
+              </tr>
             );
           })}
         </tbody>
       </table>
-      {!userItems.length && <EmptyState loading={false} label="No user usage in this date range." />}
+      {!items.length && <Empty>No user usage in this date range.</Empty>}
     </div>
   );
 }
@@ -1414,31 +1503,18 @@ function ActivityTable({
   events,
   loading,
   currency,
+  hues,
 }: {
   events: CallEvent[];
   loading: boolean;
   currency: string;
+  hues: Map<string, number>;
 }) {
-  type SortKey =
-    | "timestamp"
-    | "user"
-    | "agent"
-    | "model"
-    | "input_tokens"
-    | "output_tokens"
-    | "total_tokens"
-    | "latency_ms"
-    | "cost";
-
-  const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({
-    key: "timestamp",
-    direction: "desc",
-  });
-
-  const sortedEvents = [...events].sort((a, b) => {
-    let left: any = a[sort.key];
-    let right: any = b[sort.key];
-
+  type Key = "timestamp" | "user" | "agent" | "model" | "input_tokens" | "output_tokens" | "total_tokens" | "latency_ms" | "cost";
+  const [sort, onSort] = useSort<Key>({ key: "timestamp", direction: "desc" }, ["user", "agent", "model"]);
+  const sorted = [...events].sort((a, b) => {
+    let left: unknown = a[sort.key];
+    let right: unknown = b[sort.key];
     if (sort.key === "total_tokens") {
       left = (a.input_tokens || 0) + (a.output_tokens || 0);
       right = (b.input_tokens || 0) + (b.output_tokens || 0);
@@ -1446,98 +1522,60 @@ function ActivityTable({
       left = Date.parse(a.timestamp || a.date || "1970-01-01");
       right = Date.parse(b.timestamp || b.date || "1970-01-01");
     }
-
-    if (left == null || right == null) {
-      return left == null ? (right == null ? 0 : 1) : -1;
-    }
-    const result =
-      typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right));
+    if (left == null || right == null) return left == null ? (right == null ? 0 : 1) : -1;
+    const result = compareValues(left, right);
     return sort.direction === "asc" ? result : -result;
   });
 
-  const sortHeader = (key: SortKey, label: string) => (
-    <th aria-sort={sort.key === key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
-      <button
-        className="activity-sort-button"
-        onClick={() =>
-          setSort((current) => ({
-            key,
-            direction:
-              current.key === key
-                ? current.direction === "asc"
-                  ? "desc"
-                  : "asc"
-                : ["user", "agent", "model"].includes(key)
-                ? "asc"
-                : "desc",
-          }))
-        }
-        type="button"
-      >
-        {label}
-        {sort.key === key ? (sort.direction === "asc" ? " ↑" : " ↓") : ""}
-      </button>
-    </th>
-  );
-
   return (
-    <section className="panel full-panel">
-      <div className="panel-heading">
-        <div>
-          <div className="section-kicker">CALL ACTIVITY</div>
+    <section className="block">
+      <header className="block-head">
+        <div className="block-title">
           <h2>Recorded calls</h2>
+          <p>Every model call in range, in your local time</p>
         </div>
-        <span className="inventory-count">{formatCount(events.length)} CALLS</span>
-      </div>
-      <div className="table-scroll">
-        <table className="data-table">
+        <span className="muted">
+          <span className="num">{formatCount(events.length)}</span> calls
+        </span>
+      </header>
+      <div className="table-frame">
+        <table className="table">
           <thead>
             <tr>
-              {sortHeader("timestamp", "TIME (LOCAL)")}
-              {sortHeader("user", "USER")}
-              {sortHeader("agent", "AGENT")}
-              {sortHeader("model", "MODEL")}
-              {sortHeader("input_tokens", "INPUT TOKENS")}
-              {sortHeader("output_tokens", "OUTPUT TOKENS")}
-              {sortHeader("total_tokens", "TOTAL TOKENS")}
-              {sortHeader("latency_ms", "LATENCY")}
-              {sortHeader("cost", "EST. COST")}
+              <SortHeader sortKey="timestamp" label="Time (local)" sort={sort} onSort={onSort} />
+              <SortHeader sortKey="user" label="User" sort={sort} onSort={onSort} />
+              <SortHeader sortKey="agent" label="Agent" sort={sort} onSort={onSort} />
+              <SortHeader sortKey="model" label="Model" sort={sort} onSort={onSort} />
+              <SortHeader sortKey="input_tokens" label="Input" sort={sort} onSort={onSort} numeric />
+              <SortHeader sortKey="output_tokens" label="Output" sort={sort} onSort={onSort} numeric />
+              <SortHeader sortKey="total_tokens" label="Total" sort={sort} onSort={onSort} numeric />
+              <SortHeader sortKey="latency_ms" label="Latency" sort={sort} onSort={onSort} numeric />
+              <SortHeader sortKey="cost" label="Est. cost" sort={sort} onSort={onSort} numeric />
             </tr>
           </thead>
           <tbody>
-            {sortedEvents.map((event, index) => {
-              const totalTokens = (event.input_tokens || 0) + (event.output_tokens || 0);
-              const latencyText =
-                event.latency_ms != null && event.latency_ms > 0
-                  ? event.latency_ms >= 1000
-                    ? `${(event.latency_ms / 1000).toFixed(2)}s`
-                    : `${Math.round(event.latency_ms)}ms`
-                  : "—";
-
-              return (
-                <tr key={`${event.key || event.timestamp}-${index}`}>
-                  <td>
-                    <time dateTime={event.timestamp}>
-                      {displayCallTime(event.timestamp)}
-                    </time>
-                  </td>
-                  <td>{event.user}</td>
-                  <td>{event.agent}</td>
-                  <td>{event.model}</td>
-                  <td>{formatCount(event.input_tokens)}</td>
-                  <td>{formatCount(event.output_tokens)}</td>
-                  <td>{formatCount(totalTokens)}</td>
-                  <td>{latencyText}</td>
-                  <td>{formatMoney(event.cost, currency)}</td>
-                </tr>
-              );
-            })}
+            {sorted.map((event, index) => (
+              <tr key={`${event.key || event.timestamp}-${index}`}>
+                <td className="num muted nowrap">
+                  <time dateTime={event.timestamp}>{displayCallTime(event.timestamp)}</time>
+                </td>
+                <td>
+                  <Person name={event.user} hue={hues.get(event.user)} />
+                </td>
+                <td className="ellipsis" title={event.agent}>{event.agent}</td>
+                <td className="ellipsis muted" title={event.model}>{event.model}</td>
+                <td className="num muted">{formatCount(event.input_tokens)}</td>
+                <td className="num muted">{formatCount(event.output_tokens)}</td>
+                <td className="num">{formatCount((event.input_tokens || 0) + (event.output_tokens || 0))}</td>
+                <td className="num muted">{formatSeconds(event.latency_ms)}</td>
+                <td className="num">{formatMoney(event.cost, currency)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
-        {!events.length && <EmptyState loading={loading} label="No call activity in this date range." />}
+        {!events.length && <Empty>{loading ? "Loading calls…" : "No call activity in this date range."}</Empty>}
       </div>
     </section>
   );
 }
+

@@ -1,15 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
 import {
-  Activity, ArrowDownToLine, ArrowUpRight, Command, Cpu, GitBranch,
-  LayoutDashboard, LoaderCircle, Moon, RefreshCw,
-  Search, ShieldAlert, Sun, Users, Zap,
+  Activity,
+  ArrowDownToLine,
+  ArrowUpRight,
+  BookOpen,
+  ChevronDown,
+  Cpu,
+  GitBranch,
+  Info,
+  LayoutGrid,
+  Moon,
+  RefreshCw,
+  Search,
+  Sun,
+  TriangleAlert,
+  Users,
 } from "lucide-react";
-import {
-  Area, AreaChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
+import { motion } from "motion/react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Rail } from "@/components/Rail";
+import { RidgeMark } from "@/components/RidgeMark";
+import { SignalLines } from "@/components/SignalLines";
+import { personHues } from "@/lib/usage";
 import { useDashboardTheme } from "../theme";
 
 type Counts = {
@@ -76,15 +90,15 @@ function SortControls({ label, sort, onChange, credits = false }: {
   label: string; sort: Sort; onChange: (sort: Sort) => void; credits?: boolean;
 }) {
   return <>
-    <label className="select-filter"><select aria-label={`Sort ${label}`} value={sort.key} onChange={(event) => {
+    <label className="select"><select aria-label={`Sort ${label}`} value={sort.key} onChange={(event) => {
       const option = sortOptions.find((item) => item.key === event.target.value);
       if (option) onChange({ ...sort, key: option.key });
     }}>{sortOptions.filter((option) => credits || option.key !== "ai_credits_used").map((option) =>
-      <option key={option.key} value={option.key}>{option.label}</option>,
-    )}</select></label>
-    <label className="select-filter"><select aria-label={`Sort direction for ${label}`} value={sort.direction} onChange={(event) => {
+      <option key={option.key} value={option.key}>Sort: {option.label}</option>,
+    )}</select><ChevronDown size={14} aria-hidden="true" /></label>
+    <label className="select"><select aria-label={`Sort direction for ${label}`} value={sort.direction} onChange={(event) => {
       if (event.target.value === "asc" || event.target.value === "desc") onChange({ ...sort, direction: event.target.value });
-    }}><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+    }}><option value="desc">Descending</option><option value="asc">Ascending</option></select><ChevronDown size={14} aria-hidden="true" /></label>
   </>;
 }
 const API_BASE = (process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318").replace(/\/$/, "");
@@ -96,58 +110,61 @@ const labels: Record<string, string> = {
 };
 const featureLabel = (value: string) => labels[value] || value.replaceAll("_", " ");
 const dateLabel = (value: string | null) => value ? new Date(value.length === 10 ? `${value}T00:00:00Z` : value).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "Not reported";
-const windowLabel = (window: Window) => `${dateLabel(window.start)} - ${dateLabel(window.end)}`;
+const windowLabel = (window: Window) => `${dateLabel(window.start)} – ${dateLabel(window.end)}`;
 const tabs: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "users", label: "User usage", icon: Users },
   { id: "models", label: "Models", icon: Cpu },
 ];
+const tooltipStyle = {
+  contentStyle: { background: "var(--raised)", border: "1px solid var(--control)", borderRadius: 6, color: "var(--text)", fontSize: 12, padding: "6px 10px", boxShadow: "var(--float-shadow)" },
+  itemStyle: { color: "var(--text)", padding: 0 },
+  labelStyle: { color: "var(--muted)", marginBottom: 2 },
+};
+// Neutral ramp for the model ring: one ink, stepped by opacity in the order shown.
+const rampOpacity = (index: number) => Math.max(0.14, 1 - index * 0.17);
 
 function BreakdownTable({ rows, dimension }: { rows: Breakdown[]; dimension: "Model" | "Feature" }) {
-  return <div className="table-scroll"><table className="data-table github-table">
-    <thead><tr><th>{dimension}</th><th>Prompts</th><th>Generations</th><th>Acceptances</th><th>Lines added</th><th>Lines deleted</th></tr></thead>
+  return <div className="table-frame"><table className="table">
+    <thead><tr><th>{dimension}</th><th className="num">Prompts</th><th className="num">Generations</th><th className="num">Acceptances</th><th className="num">Lines added</th><th className="num">Lines deleted</th></tr></thead>
     <tbody>{rows.map((row) => <tr key={row.name}>
-      <td><strong>{dimension === "Feature" ? featureLabel(row.name) : row.name}</strong></td>
-      <td>{count(row.user_initiated_interaction_count)}</td><td>{count(row.code_generation_activity_count)}</td>
-      <td>{count(row.code_acceptance_activity_count)}</td><td>{count(row.loc_added_sum)}</td><td>{count(row.loc_deleted_sum)}</td>
+      <td className="strong">{dimension === "Feature" ? featureLabel(row.name) : row.name}</td>
+      <td className="num">{count(row.user_initiated_interaction_count)}</td><td className="num">{count(row.code_generation_activity_count)}</td>
+      <td className="num">{count(row.code_acceptance_activity_count)}</td><td className="num muted">{count(row.loc_added_sum)}</td><td className="num muted">{count(row.loc_deleted_sum)}</td>
     </tr>)}</tbody>
-  </table>{!rows.length && <div className="empty-state">No {dimension.toLowerCase()} breakdown was reported for this window.</div>}</div>;
+  </table>{!rows.length && <p className="empty">No {dimension.toLowerCase()} breakdown was reported for this window.</p>}</div>;
 }
 
 function ModelUsageChart({ rows, metric }: { rows: Breakdown[]; metric: ModelMetric }) {
   const metricLabel = sortOptions.find((option) => option.key === metric)?.label;
-  if (!rows.length) return <div className="empty-state">No models match the current filters.</div>;
+  if (!rows.length) return <p className="empty">No models match the current filters.</p>;
   const total = rows.reduce((sum, row) => sum + row[metric], 0);
-  const chartRows = rows.map((row) => {
-    const hue = Array.from(row.name).reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) % 360, 0);
-    return { ...row, fill: `hsl(${hue}, 65%, 60%)` };
-  });
+  const chartRows = rows.map((row, index) => ({ ...row, opacity: rampOpacity(index) }));
   const share = (value: number) => `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(total ? value / total * 100 : 0)}%`;
-  return <section className="github-model-chart" aria-label={`Model usage pie chart: ${metricLabel}`}>
-    <div className="panel-heading"><h2>Model usage</h2><span className="github-caption">{metricLabel} / {rows.length} models / current sort order</span></div>
-    <div className="github-model-pie-layout">
-      <div className="github-model-pie-canvas">
-        {total > 0 ?
+  return <section className="ring-layout" aria-label={`Model usage ring chart: ${metricLabel}`}>
+    <div className="ring">
+      {total > 0 ? <>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={chartRows.filter((row) => row[metric] > 0)} dataKey={metric} nameKey="name" outerRadius="85%" stroke="var(--surface)" strokeWidth={2} isAnimationActive={false} />
-            <Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", borderRadius: 8 }} itemStyle={{ color: "var(--ink)" }} formatter={(value) => {
+            <Pie data={chartRows.filter((row) => row[metric] > 0)} dataKey={metric} nameKey="name" innerRadius={98} outerRadius={108} paddingAngle={0.6} stroke="var(--surface)" strokeWidth={1} isAnimationActive={false}>
+              {chartRows.filter((row) => row[metric] > 0).map((row) => <Cell key={row.name} fill="var(--chart-ink)" fillOpacity={row.opacity} />)}
+            </Pie>
+            <Tooltip {...tooltipStyle} formatter={(value) => {
               const amount = Number(value);
               return `${count(amount)} ${metricLabel?.toLowerCase()} (${share(amount)})`;
             }} />
           </PieChart>
         </ResponsiveContainer>
-        : <div className="empty-state">No {metricLabel?.toLowerCase()} reported for the matching models.</div>}
-      </div>
-      <ul className="github-model-pie-legend" aria-label="Model usage values and percentages">
-        {chartRows.map((row) => <li key={row.name}>
-          <span className="github-model-pie-swatch" style={{ background: row.fill }} aria-hidden="true" />
-          <span className="github-model-pie-name">{row.name}</span>
-          <strong>{count(row[metric])}</strong><span className="github-caption">{share(row[metric])}</span>
-        </li>)}
-      </ul>
+        <div className="ring-total"><strong>{short(total)}</strong><span>{metricLabel?.toLowerCase()}</span></div>
+      </> : <p className="empty">No {metricLabel?.toLowerCase()} reported for the matching models.</p>}
     </div>
-    <p className="github-caption">Slices show each model&apos;s share of {metricLabel?.toLowerCase()} among the matching models, not credits, token usage, or billing cost. Zero values remain in the legend without a slice. The legend, table, and CSV use the same filtered sort order.</p>
+    <ul className="legend-table" aria-label="Model usage values and percentages">
+      {chartRows.map((row) => <li key={row.name}>
+        <span className="legend-swatch" style={{ background: "var(--chart-ink)", opacity: row.opacity }} aria-hidden="true" />
+        <span className="legend-name" title={row.name}>{row.name}</span>
+        <span className="num">{count(row[metric])}</span><span className="num muted">{share(row[metric])}</span>
+      </li>)}
+    </ul>
   </section>;
 }
 
@@ -190,7 +207,8 @@ export default function GitHubMetricsPage() {
   }, [refreshKey]);
 
   const org = data?.organization_metrics;
-  const users = data?.user_metrics?.users ?? [];
+  const users = useMemo(() => data?.user_metrics?.users ?? [], [data]);
+  const hues = useMemo(() => personHues(users.map((user) => user.login)), [users]);
   const query = search.trim().toLowerCase();
   const filteredUsers = sortRows(users.filter((user) =>
     `${user.login} ${user.id} ${user.features.join(" ")}`.toLowerCase().includes(query),
@@ -201,6 +219,7 @@ export default function GitHubMetricsPage() {
   const completionRate = completion && completion.code_generation_activity_count > 0 ?
     100 * completion.code_acceptance_activity_count / completion.code_generation_activity_count : null;
   const modelPromptTotal = (org?.models ?? []).reduce((total, model) => total + model.user_initiated_interaction_count, 0);
+  const topModelPrompts = Math.max(0, ...(org?.models ?? []).slice(0, 5).map((model) => model.user_initiated_interaction_count));
   const reportWindowsDiffer = org && data?.user_metrics &&
     (org.window.start !== data.user_metrics.window.start || org.window.end !== data.user_metrics.window.end);
 
@@ -229,111 +248,146 @@ export default function GitHubMetricsPage() {
   }
 
   const exportAvailable = tab === "users" ? filteredUsers.length : tab === "models" ? filteredModels.length : 0;
+  const kpis = data ? [
+    { label: "Reported users", value: data.user_metrics ? users.length : null, note: "Users included in the user report" },
+    { label: "Code generations", value: org?.totals.code_generation_activity_count, note: "Copilot output events in the window" },
+    { label: "User prompts", value: org?.totals.user_initiated_interaction_count, note: "Explicit interactions in the window" },
+    { label: "Lines added", value: org?.totals.loc_added_sum, note: "Accepted code and agent/editor additions" },
+  ] : [];
 
-  return <main className="app-shell github-shell">
-    <aside className="sidebar">
-      <Link className="brand" href="/"><span className="brand-mark"><Command size={19} /></span><span className="brand-copy"><strong>Agent Command</strong><small>CENTER</small></span></Link>
-      <div className="workspace-label">ORGANIZATION</div>
-      <div className="workspace-switcher"><span className="workspace-avatar"><GitBranch size={18} /></span><span className="workspace-name"><strong>{data?.organization ?? "GitHub organization"}</strong><small>Copilot REST metrics</small></span></div>
-      <div className="nav-label">ANALYTICS</div>
-      <nav className="primary-nav" aria-label="Dashboard sections">
-        <Link className="nav-item github-nav-link" href="/" aria-label="Telemetry dashboard" title="Telemetry dashboard"><LayoutDashboard size={18} /><span>Telemetry dashboard</span></Link>
-        <Link className="nav-item active github-nav-link" href="/github-metrics" aria-current="page" aria-label="GitHub Metrics" title="GitHub Metrics"><GitBranch size={18} /><span>GitHub Metrics</span></Link>
-      </nav>
-      <div className="sidebar-bottom">
-        <div className="source-card"><div className="source-card-top"><GitBranch size={13} /> DATA SOURCE</div><strong>GitHub REST API</strong><small>Daily reports / latest 28 days</small></div>
-        <a className="help-link" href="https://docs.github.com/en/rest/copilot/copilot-usage-metrics" target="_blank" rel="noreferrer">Metrics documentation <ArrowUpRight size={13} /></a>
-        <div className="sidebar-foot"><span>SEPARATE FROM OTEL DATA</span></div>
+  return <div className="app">
+    <Rail
+      active="github"
+      items={[
+        { id: "overview", label: "Telemetry overview", short: "Overview", icon: LayoutGrid, href: "/" },
+        { id: "github", label: "GitHub metrics", short: "GitHub", icon: GitBranch, href: "/github-metrics" },
+      ]}
+      utilities={[
+        { id: "theme", label: theme === "dark" ? "Light mode" : "Dark mode", icon: theme === "dark" ? Sun : Moon, onSelect: toggleTheme },
+        { id: "docs", label: "Metrics documentation", icon: BookOpen, href: "https://docs.github.com/en/rest/copilot/copilot-usage-metrics" },
+      ]}
+    />
+    <main className="canvas">
+      <div className="mobile-bar">
+        <RidgeMark size={22} />
+        <strong>Agent Command Center</strong>
+        <button className="icon-button" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>{theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}</button>
       </div>
-    </aside>
-    <section className="main-panel">
-      <header className="topbar">
-        <span className="github-topbar-label"><GitBranch size={17} /> Organization intelligence</span>
-        <div className="topbar-actions">
-          <button className="icon-button" onClick={toggleTheme} type="button" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
+      <header className="title-row">
+        <div className="title-block">
+          <h1>GitHub metrics</h1>
+          <p className="title-meta">
+            {data ? <>
+              <span>{data.organization}</span><span aria-hidden="true">·</span>
+              <span>{org ? windowLabel(org.window) : "Organization report unavailable"}</span><span aria-hidden="true">·</span>
+              <span className="freshness" data-state={error ? "error" : "ok"}><i aria-hidden="true" />Fetched {new Date(data.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            </> : <span>Adoption, people and model usage from GitHub&apos;s organization reports.</span>}
+          </p>
+        </div>
+        <div className="title-actions">
+          <button className="icon-button" type="button" title="Refresh" aria-label="Refresh GitHub metrics" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading}><RefreshCw size={15} className={loading ? "spin" : undefined} aria-hidden="true" /></button>
+          <button className="button" type="button" onClick={exportCsv} disabled={!exportAvailable}><ArrowDownToLine size={14} aria-hidden="true" /> Export CSV</button>
         </div>
       </header>
-      <div className="content-wrap">
-        <div className="page-heading">
-          <div><div className="eyebrow"><GitBranch size={13} /> GITHUB COPILOT METRICS</div><h1>GitHub Metrics</h1><p>{data ? `${data.organization} / ${org ? windowLabel(org.window) : "Organization report unavailable"}` : "Adoption, people, and model usage from GitHub's organization reports."}</p></div>
-          <div className="heading-meta">
-            <button className="export-button" onClick={() => setRefreshKey((key) => key + 1)} type="button" disabled={loading}><RefreshCw size={15} className={loading ? "spin" : ""} /> Refresh</button>
-            <button className="export-button" onClick={exportCsv} type="button" disabled={!exportAvailable}><ArrowDownToLine size={15} /> CSV</button>
-          </div>
+
+      {error && <div className="notice is-negative" role="alert"><TriangleAlert size={15} aria-hidden="true" /><span>GitHub metrics could not be loaded. <span className="muted">{error}{data ? " Showing the last successful snapshot; it is not refreshed." : ""}</span></span><button className="text-button" type="button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading}>Retry</button></div>}
+      {loading && !data && <section className="block inline-loader" role="status"><SignalLines compact /><p>Fetching GitHub usage reports…</p></section>}
+
+      {data && <div className="view">
+        <div className="notes">
+          <div className="notice is-neutral"><Info size={15} aria-hidden="true" /><div><strong>Daily reports, not real-time telemetry</strong>Latest available 28-day window. Prompts are explicit user interactions, not LLM calls or tokens. Reports can lag behind activity. AI credits are consumption metrics, not an invoice.</div></div>
+          <div className="notice is-neutral"><Info size={15} aria-hidden="true" /><div><strong>Reported credits are not your VS Code billing-cycle balance</strong>{data.user_metrics ? `Credit report window: ${windowLabel(data.user_metrics.window)} (UTC). ` : "Credit report unavailable. "}This rolling organization report is not a billing-cycle total and does not include activity after its end date. GitHub says recent telemetry typically finalizes within three full UTC days. &quot;0 reported&quot; means GitHub supplied zero; it does not mean the user had no activity or no billed usage. Missing credit values are shown as unavailable, not zero. <a href="https://docs.github.com/en/copilot/reference/copilot-usage-metrics/reconciling-usage-metrics" target="_blank" rel="noreferrer">How GitHub usage reports differ</a></div></div>
         </div>
-        {error && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>GitHub metrics could not be loaded</strong><span>{error}{data ? " Showing the last successful snapshot; it is not refreshed." : ""}</span></div><button onClick={() => setRefreshKey((key) => key + 1)} type="button" disabled={loading}>Retry</button></div>}
-        {loading && !data && <div className="empty-state" role="status"><LoaderCircle size={24} className="spin" /><p>Fetching GitHub usage reports...</p></div>}
-        {data && <>
-          <div className="github-report-note"><Activity size={19} aria-hidden="true" /><div><strong>Daily reports, not real-time telemetry</strong><p>Latest available 28-day window. Prompts are explicit user interactions, not LLM calls or tokens. Reports can lag behind activity. AI credits are consumption metrics, not an invoice.</p></div></div>
-          <div className="github-report-note"><ShieldAlert size={19} aria-hidden="true" /><div><strong>Reported credits are not your VS Code billing-cycle balance</strong><p>{data.user_metrics ? `Credit report window: ${windowLabel(data.user_metrics.window)} (UTC). ` : "Credit report unavailable. "}This rolling organization report is not a billing-cycle total and does not include activity after its end date. GitHub says recent telemetry typically finalizes within three full UTC days. &quot;0 reported&quot; means GitHub supplied zero; it does not mean the user had no activity or no billed usage. Missing credit values are shown as unavailable, not zero.</p><a className="text-link" href="https://docs.github.com/en/copilot/reference/copilot-usage-metrics/reconciling-usage-metrics" target="_blank" rel="noreferrer">How GitHub usage reports differ <ArrowUpRight size={12} /></a></div></div>
-          {Object.entries(data.errors).map(([section, message]) => <div className="stale-banner" role="alert" key={section}><ShieldAlert size={16} /><span><strong>{section.replaceAll("_", " ")} unavailable:</strong> {message}</span></div>)}
-          {reportWindowsDiffer && <div className="stale-banner">User and organization reports have different reporting windows. Their totals should not be directly compared.</div>}
-          <section className="metric-grid" aria-label="GitHub usage totals">
-            {[
-              { label: "REPORTED USERS", value: data.user_metrics ? users.length : null, detail: "Users included in the user report", icon: Users },
-              { label: "CODE GENERATIONS", value: org?.totals.code_generation_activity_count, detail: "Copilot output events in the report window", icon: Activity },
-              { label: "USER PROMPTS", value: org?.totals.user_initiated_interaction_count, detail: "Explicit interactions in the report window", icon: Zap },
-              { label: "LINES ADDED", value: org?.totals.loc_added_sum, detail: "Accepted code and agent/editor additions", icon: Cpu },
-            ].map(({ label, value, detail, icon: Icon }) => <article className="metric-card" key={label}><div className="metric-label">{label}<Icon size={17} /></div><div className="metric-value">{count(value)}</div><div className="metric-foot">{detail}</div></article>)}
+        {(Object.keys(data.errors).length > 0 || reportWindowsDiffer) && <div className="notice-stack">
+          {Object.entries(data.errors).map(([section, message]) => <div className="notice is-warning" role="alert" key={section}><TriangleAlert size={15} aria-hidden="true" /><span><strong>{section.replaceAll("_", " ")} unavailable:</strong> {message}</span></div>)}
+          {reportWindowsDiffer && <div className="notice is-warning"><TriangleAlert size={15} aria-hidden="true" /><span>User and organization reports have different reporting windows. Their totals should not be directly compared.</span></div>}
+        </div>}
+
+        <section className="kpis is-four" aria-label="GitHub usage totals">
+          {kpis.map(({ label, value, note }) => <div className="kpi" key={label}>
+            <span className="kpi-label">{label}</span>
+            <span className="kpi-value num">{value == null ? <span className="dash">Unavailable</span> : count(value)}</span>
+            <span className="kpi-note">{note}</span>
+          </div>)}
+        </section>
+
+        <div>
+          <nav className="tabs" role="tablist" aria-label="GitHub metric views">{tabs.map(({ id, label, icon: Icon }) => <button type="button" role="tab" key={id} aria-selected={tab === id} onClick={() => { setTab(id); setSearch(""); }}>
+            <Icon size={15} strokeWidth={1.6} aria-hidden="true" />{label}
+            {tab === id && <motion.span className="select-line" layoutId="gh-tab" transition={{ type: "spring", stiffness: 560, damping: 44 }} />}
+          </button>)}</nav>
+        </div>
+
+        {tab === "overview" && <>
+          <div className="chart-row" style={{ marginTop: 0 }}>
+            <section className="block">
+              <header className="block-head"><div className="block-title"><h2>Daily Copilot activity</h2><p>Prompts and code generations per UTC day</p></div></header>
+              {org?.daily.length ? <>
+                <div className="area-chart"><ResponsiveContainer width="100%" height={214}><AreaChart data={org.daily} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="day" tickFormatter={(day: string) => dateLabel(day).replace(/, \d{4}$/, "")} axisLine={false} tickLine={false} minTickGap={28} />
+                  <YAxis tickFormatter={short} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip {...tooltipStyle} cursor={{ stroke: "var(--accent)", strokeWidth: 1 }} formatter={(value) => count(typeof value === "number" ? value : Number(value))} />
+                  <Area type="linear" dataKey="user_initiated_interaction_count" name="User prompts" stroke="var(--chart-ink)" strokeWidth={1.5} fill="var(--chart-ink)" fillOpacity={0.06} isAnimationActive={false} />
+                  <Area type="linear" dataKey="code_generation_activity_count" name="Code generations" stroke="var(--muted)" strokeWidth={1.5} fill="transparent" isAnimationActive={false} />
+                </AreaChart></ResponsiveContainer></div>
+                <div className="chart-legend"><span style={{ color: "var(--chart-ink)" }}><i />User prompts</span><span><i />Code generations</span></div>
+              </> : <p className="empty">Daily activity is unavailable or no activity was reported.</p>}
+            </section>
+            <section className="block">
+              <header className="block-head"><div className="block-title"><h2>Most used models</h2><p>Chat model mix by prompts</p></div><button className="text-button" type="button" onClick={() => setTab("models")}>View all <ArrowUpRight size={13} aria-hidden="true" /></button></header>
+              <ol className="rank-list">{org?.models.slice(0, 5).map((model) => <li key={model.name} style={{ "--fill": topModelPrompts ? model.user_initiated_interaction_count / topModelPrompts : 0 } as CSSProperties}>
+                <span title={model.name}>{model.name}</span>
+                <span className="num">{count(model.user_initiated_interaction_count)} <span className="muted">· {modelPromptTotal ? `${(model.user_initiated_interaction_count / modelPromptTotal * 100).toFixed(1)}%` : "0.0%"}</span></span>
+              </li>)}</ol>
+              {!org?.models.length && <p className="empty">No model breakdown reported.</p>}
+              <p className="block-foot">Share of reported model prompts only. Not token usage or cost.</p>
+            </section>
+          </div>
+          <section className="block">
+            <header className="block-head"><div className="block-title"><h2>How Copilot is being used</h2><p>Feature adoption across the report window</p></div><span className="muted">Completion acceptance: <span className="num">{completionRate === null ? "Unavailable" : `${completionRate.toFixed(1)}%`}</span></span></header>
+            <div className="gh-controls"><span className="caption">Sort feature activity</span><SortControls label="features" sort={featureSort} onChange={setFeatureSort} /></div>
+            {org ? <BreakdownTable rows={sortedFeatures} dimension="Feature" /> : <p className="empty">Feature metrics are unavailable.</p>}
           </section>
-          <nav className="github-tabs" aria-label="GitHub metric views">{tabs.map(({ id, label, icon: Icon }) => <button type="button" key={id} className={tab === id ? "selected" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setSearch(""); }}><Icon size={16} />{label}</button>)}</nav>
-          {tab === "overview" && <>
-            <div className="overview-grid">
-              <section className="panel trend-panel"><div className="panel-heading"><div><div className="section-kicker">ENGAGEMENT OVER TIME</div><h2>Daily Copilot activity</h2></div></div>
-                {org?.daily.length ? <><div className="chart-frame"><ResponsiveContainer width="100%" height="100%"><AreaChart data={org.daily}>
-                  <CartesianGrid stroke="var(--line)" vertical={false} /><XAxis dataKey="day" tickFormatter={(day: string) => day.slice(5)} stroke="var(--muted)" fontSize={10} /><YAxis tickFormatter={short} stroke="var(--muted)" fontSize={10} />
-                  <Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", borderRadius: 8 }} formatter={(value) => count(typeof value === "number" ? value : Number(value))} />
-                  <Area type="monotone" dataKey="user_initiated_interaction_count" name="User prompts" stroke="var(--accent)" fill="var(--accent)" fillOpacity={0.13} />
-                  <Area type="monotone" dataKey="code_generation_activity_count" name="Code generations" stroke="var(--green)" fill="var(--green)" fillOpacity={0.08} />
-                </AreaChart></ResponsiveContainer></div><div className="chart-legend"><span>User prompts</span><span>Code generations</span></div></> : <div className="empty-state">Daily activity is unavailable or no activity was reported.</div>}
-              </section>
-              <section className="panel model-panel"><div className="panel-heading"><div><div className="section-kicker">CHAT MODEL MIX</div><h2>Most used models</h2></div><button className="text-link" type="button" onClick={() => setTab("models")}>View all</button></div>
-                <div className="model-list">{org?.models.slice(0, 5).map((model, index) => <div className="model-row" key={model.name}><span className={`model-index model-index-${index % 4}`}>{String(index + 1).padStart(2, "0")}</span><div className="model-details"><div className="model-name-line"><strong>{model.name}</strong><span>{count(model.user_initiated_interaction_count)} prompts</span></div><div className="model-bar"><span style={{ width: `${modelPromptTotal ? model.user_initiated_interaction_count / modelPromptTotal * 100 : 0}%` }} /></div></div></div>)}</div>
-                {!org?.models.length && <div className="empty-state">No model breakdown reported.</div>}<div className="model-panel-footer">Share of reported model prompts only. Not token usage or cost.</div>
-              </section>
-            </div>
-            <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">FEATURE ADOPTION</div><h2>How Copilot is being used</h2></div><span className="github-caption">Completion acceptance: {completionRate === null ? "Unavailable" : `${completionRate.toFixed(1)}%`}</span></div>
-              <div className="filter-row"><span className="github-caption">Sort feature activity</span><SortControls label="features" sort={featureSort} onChange={setFeatureSort} /></div>
-              {org ? <BreakdownTable rows={sortedFeatures} dimension="Feature" /> : <div className="empty-state">Feature metrics are unavailable.</div>}
-            </section>
-            <section className="panel full-panel"><div className="panel-heading"><div><div className="section-kicker">DAILY IDE REACH</div><h2>IDE active users by day</h2></div><span className="github-caption">Daily counts are not additive; CLI activity is counted separately by GitHub</span></div>
-              <div className="github-daily-grid">{org?.daily.map((day) => <div className="github-day" key={day.day} title={`${day.day}: ${count(day.daily_active_users)} active users`}><span>{day.day.slice(5)}</span><strong>{count(day.daily_active_users)}</strong></div>)}</div>
-              {!org?.daily.length && <div className="empty-state">Daily user counts are unavailable.</div>}
-            </section>
-          </>}
-          {tab !== "overview" && <section className="panel full-panel">
-            <div className="panel-heading"><div><div className="section-kicker">28-DAY REPORT</div><h2>{tabs.find((item) => item.id === tab)?.label}</h2></div><span className="github-caption">{tab === "users" ? data.user_metrics ? windowLabel(data.user_metrics.window) : "User reporting window unavailable" : org ? windowLabel(org.window) : "Organization reporting window unavailable"}</span></div>
-            <div className="filter-row">
-              <label className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} aria-label={`Search ${tab}`} placeholder={tab === "models" ? "Search models" : "Search GitHub alias or ID"} /></label>
-              {tab === "users" ? <SortControls label="users" sort={userSort} onChange={setUserSort} credits /> : <>
-                <label className="select-filter"><select aria-label="Model chart metric" value={modelMetric} onChange={(event) => {
-                  const option = sortOptions.find((item) => item.key === event.target.value);
-                  if (option && option.key !== "name" && option.key !== "ai_credits_used") setModelMetric(option.key);
-                }}>{sortOptions.filter((option) => option.key !== "name" && option.key !== "ai_credits_used").map((option) =>
-                  <option key={option.key} value={option.key}>Pie: {option.label}</option>,
-                )}</select></label>
-                <SortControls label="models" sort={modelSort} onChange={setModelSort} />
-              </>}
-            </div>
-            {tab === "models" && <><p className="github-caption">Chat activity grouped by model across features. Choose the pie metric independently of the sort field and direction; breakdowns may not cover every feature.</p>{org ? <><ModelUsageChart rows={filteredModels} metric={modelMetric} /><BreakdownTable rows={filteredModels} dimension="Model" /></> : <div className="empty-state">Model metrics are unavailable.</div>}</>}
-            {tab === "users" && <>
-              <p className="github-caption">Per-user report metrics are independent of local captureIdentity. Expand credit details to inspect GitHub&apos;s daily values; a reported zero is not an inactivity verdict.</p>
-              <div className="table-scroll"><table className="data-table github-table"><thead><tr><th>GitHub user</th><th>Prompts</th><th>Generations</th><th>Acceptances</th><th>Lines added</th><th>Lines deleted</th><th>Reported AI credits</th><th>Features used</th></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}>
-                <td><div className="github-user"><span className="agent-avatar">{user.login.slice(0, 2).toUpperCase()}</span><div><a href={`https://github.com/${encodeURIComponent(user.login)}`} target="_blank" rel="noreferrer">{user.login}<ArrowUpRight size={11} /></a><small>ID {user.id}</small></div></div></td>
-                <td>{count(user.user_initiated_interaction_count)}</td><td>{count(user.code_generation_activity_count)}</td><td>{count(user.code_acceptance_activity_count)}</td><td>{count(user.loc_added_sum)}</td><td>{count(user.loc_deleted_sum)}</td><td>
-                  <strong>{user.ai_credits_used === 0 ? "0 reported" : count(user.ai_credits_used)}</strong>
-                  <details className="github-credit-details"><summary aria-label={`Credit details for ${user.login}`}>Daily report details</summary>
-                    {user.daily_usage?.length ? <table><caption>UTC date / reported credits / prompts</caption><thead><tr><th>Date</th><th>Credits</th><th>Prompts</th></tr></thead><tbody>{user.daily_usage.map((day) => <tr key={day.day}><td>{day.day}</td><td>{day.ai_credits_used === 0 ? "0 reported" : count(day.ai_credits_used)}</td><td>{count(day.user_initiated_interaction_count)}</td></tr>)}</tbody></table> : <p>Daily breakdown unavailable in this report.</p>}
-                    <p>Only returned report rows are shown. Missing dates do not establish zero usage. Credits are not reconstructed from prompts or tokens.</p>
-                  </details>
-                </td>
-                <td><div className="github-tags">{user.features.map((feature) => <span key={feature}>{feature}</span>)}{!user.features.length && <span>No feature flags reported</span>}</div></td>
-              </tr>)}</tbody></table>{!filteredUsers.length && <div className="empty-state">{data.user_metrics ? "No users match these filters." : "User metrics are unavailable."}</div>}</div>
-            </>}
-          </section>}
-          <footer className="page-footer"><span>GitHub snapshot: {new Date(data.fetched_at).toLocaleString()} / server cache: {data.cache_seconds / 60} minutes</span><span>GitHub REST API / no OTLP data mixed in</span></footer>
+          <section className="block">
+            <header className="block-head"><div className="block-title"><h2>IDE active users by day</h2><p>Daily counts are not additive; CLI activity is counted separately by GitHub</p></div></header>
+            <div className="daily-grid">{org?.daily.map((day) => <div key={day.day} title={`${day.day}: ${count(day.daily_active_users)} active users`}><span className="num">{day.day.slice(5)}</span><strong className="num">{count(day.daily_active_users)}</strong></div>)}</div>
+            {!org?.daily.length && <p className="empty">Daily user counts are unavailable.</p>}
+          </section>
         </>}
-      </div>
-    </section>
-  </main>;
+
+        {tab !== "overview" && <section className="block">
+          <header className="block-head"><div className="block-title"><h2>{tabs.find((item) => item.id === tab)?.label}</h2><p>28-day report</p></div><span className="muted">{tab === "users" ? data.user_metrics ? windowLabel(data.user_metrics.window) : "User reporting window unavailable" : org ? windowLabel(org.window) : "Organization reporting window unavailable"}</span></header>
+          <div className="gh-controls">
+            <label className="search"><Search size={15} aria-hidden="true" /><input value={search} onChange={(event) => setSearch(event.target.value)} aria-label={`Search ${tab}`} placeholder={tab === "models" ? "Search models" : "Search GitHub alias or ID"} /></label>
+            {tab === "users" ? <SortControls label="users" sort={userSort} onChange={setUserSort} credits /> : <>
+              <label className="select"><select aria-label="Model chart metric" value={modelMetric} onChange={(event) => {
+                const option = sortOptions.find((item) => item.key === event.target.value);
+                if (option && option.key !== "name" && option.key !== "ai_credits_used") setModelMetric(option.key);
+              }}>{sortOptions.filter((option) => option.key !== "name" && option.key !== "ai_credits_used").map((option) =>
+                <option key={option.key} value={option.key}>Ring: {option.label}</option>,
+              )}</select><ChevronDown size={14} aria-hidden="true" /></label>
+              <SortControls label="models" sort={modelSort} onChange={setModelSort} />
+            </>}
+          </div>
+          {tab === "models" && <><p className="caption" style={{ marginBottom: 16 }}>Chat activity grouped by model across features. Choose the ring metric independently of the sort field and direction; breakdowns may not cover every feature. Each model keeps its share of the matching models only, not credits, token usage or billing cost. Zero values stay in the legend without a segment.</p>{org ? <><ModelUsageChart rows={filteredModels} metric={modelMetric} /><BreakdownTable rows={filteredModels} dimension="Model" /></> : <p className="empty">Model metrics are unavailable.</p>}</>}
+          {tab === "users" && <>
+            <p className="caption" style={{ marginBottom: 16 }}>Per-user report metrics are independent of local captureIdentity. Expand credit details to inspect GitHub&apos;s daily values; a reported zero is not an inactivity verdict.</p>
+            <div className="table-frame"><table className="table"><thead><tr><th>GitHub user</th><th className="num">Prompts</th><th className="num">Generations</th><th className="num">Acceptances</th><th className="num">Lines added</th><th className="num">Lines deleted</th><th className="num">Reported AI credits</th><th>Features used</th></tr></thead><tbody>{filteredUsers.map((user) => <tr key={user.id}>
+              <td><span className="person"><span className="avatar" style={{ "--hue": hues.get(user.login) ?? 0 } as CSSProperties} aria-hidden="true">{user.login.slice(0, 1).toUpperCase()}</span><span className="gh-user"><a href={`https://github.com/${encodeURIComponent(user.login)}`} target="_blank" rel="noreferrer">{user.login}<ArrowUpRight size={11} aria-hidden="true" /></a><small className="muted num">ID {user.id}</small></span></span></td>
+              <td className="num">{count(user.user_initiated_interaction_count)}</td><td className="num">{count(user.code_generation_activity_count)}</td><td className="num">{count(user.code_acceptance_activity_count)}</td><td className="num muted">{count(user.loc_added_sum)}</td><td className="num muted">{count(user.loc_deleted_sum)}</td><td className="num">
+                <span>{user.ai_credits_used === 0 ? "0 reported" : count(user.ai_credits_used)}</span>
+                <details className="credit-details"><summary aria-label={`Credit details for ${user.login}`}>Daily report details</summary>
+                  {user.daily_usage?.length ? <table><caption>UTC date / reported credits / prompts</caption><thead><tr><th>Date</th><th>Credits</th><th>Prompts</th></tr></thead><tbody>{user.daily_usage.map((day) => <tr key={day.day}><td className="num">{day.day}</td><td className="num">{day.ai_credits_used === 0 ? "0 reported" : count(day.ai_credits_used)}</td><td className="num">{count(day.user_initiated_interaction_count)}</td></tr>)}</tbody></table> : <p>Daily breakdown unavailable in this report.</p>}
+                  <p>Only returned report rows are shown. Missing dates do not establish zero usage. Credits are not reconstructed from prompts or tokens.</p>
+                </details>
+              </td>
+              <td><div className="tag-list">{user.features.map((feature) => <span className="pill is-neutral" key={feature}>{feature}</span>)}{!user.features.length && <span className="muted">No feature flags reported</span>}</div></td>
+            </tr>)}</tbody></table>{!filteredUsers.length && <p className="empty">{data.user_metrics ? "No users match these filters." : "User metrics are unavailable."}</p>}</div>
+          </>}
+        </section>}
+      </div>}
+      {data && <footer className="status-footer"><span>GitHub snapshot <span className="num">{new Date(data.fetched_at).toLocaleString()}</span> · server cache <span className="num">{data.cache_seconds / 60}</span> minutes</span><span>GitHub REST API · no OTLP data mixed in</span></footer>}
+    </main>
+  </div>;
 }

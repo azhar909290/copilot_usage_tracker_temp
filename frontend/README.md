@@ -62,11 +62,24 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 ## Dashboard
 
-The overview includes call, token, estimated-cost, and unpriced-call totals; token trends; model mix; and agent activity. The Agents, Models, and Activity views share date, agent, model, and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
+The overview answers "where is the team's Copilot usage going, and what does it cost?" for the selected range (7, 30 or 90 days):
+
+- **Title row**: the range, a freshness stamp, and the strongest finding in one sentence (for example, which model drove most of the estimated cost).
+- **KPI strip**: calls, tokens (in/out), estimated cost (with unpriced calls flagged), users (with how many are live), and median/p95 latency. Calls, Tokens and Est. cost double as the metric switch for the two charts below.
+- **Daily rhythm**: a three.js ridgeline, with one line per receiver day and the newest day (amber) in front. Each line is the smoothed density of the selected metric by UTC time of day (18-minute Gaussian kernel), so the area under a line equals that day's total. Hovering reads the exact 30-minute bin under the pointer; clicking opens that day in Activity. Browsers without WebGL get a flat SVG version of the same data.
+- **Per-day bars**: the same metric per day on a labelled scale, linked to the ridge (hovering either highlights the same day in both). Today's bar is amber; arrow keys and Enter work when the chart has focus.
+- **Findings carousel**: plain-language facts computed from the filtered data (biggest cost driver, unpriced calls, peak half-hour, busiest agent, heaviest user, busiest day, slowest model, input/output ratio), each with an action that applies a filter or opens a view. Slide width and travel are computed in CSS viewport units; it autoplays every 7 seconds, pauses on hover, keyboard focus or the Pause button, supports drag/swipe and arrow keys, and never autoplays under reduced motion.
+- **Models and Agents** share lists (top five, row fill as the bar) and **Recent calls**.
+
+The Users, Catalog, Models and Activity views share the date, user, agent, model and text filters. The dashboard also supports auto-refresh and CSV export. Agents without an exact marketplace match are shown separately as telemetry-only agents.
+
+Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> for the command menu (views, agents, users, models and actions with fuzzy search), or <kbd>/</kbd> to focus the filter search.
+
+On first load, a full-screen loader reports the real loading stages (interface, receiver, ledger, composing) with their measured durations, then wipes away as soon as the data is on screen. It is part of the static HTML, so it paints before JavaScript runs.
 
 The overview's live strip lists users whose most recent recorded model call
 started within the last 5 minutes, and the Users table highlights them with a
-LIVE badge. This is based on exported call start times, so it reflects recent
+Live badge. This is based on exported call start times, so it reflects recent
 Copilot model calls rather than an open VS Code window, and it depends on the
 client exporting promptly. `unknown` is excluded, and the view is not affected
 by the dashboard filters. Live status is recalculated every 15 seconds; new calls
@@ -89,9 +102,25 @@ npm run build
 npm start
 ```
 
+## Design and UI stack
+
+The visual system follows the [taste-skill](https://github.com/Leonxlnx/taste-skill) "Data terminal" app style: a near-black ground with cards a step darker, figures in IBM Plex Mono (tabular), text in Public Sans, and one accent (OpenTelemetry amber). Colour is reserved for data and selection: every selected item (nav, range, KPI, tab, sort column, carousel page) is marked by a 1px amber line as wide as its label. Light mode maps the same roles onto a neutral light palette. All tokens live at the top of `src/app/globals.css`.
+
+| Library | Used for |
+| --- | --- |
+| `next/font` | Self-hosted Public Sans and IBM Plex Mono |
+| `three` + `@react-three/fiber` | The Daily rhythm ridgeline (loaded on demand, rendered only when something changes) |
+| `motion` | Selection-line transitions and view changes |
+| `cmdk` | The ⌘K command menu |
+| `@number-flow/react` | KPI figures that roll to new values on refresh |
+
+The interface respects `prefers-reduced-motion`: the loader, carousel, ridge rise and parallax become static. The rail folds into a bottom bar below 720px.
+
+If `npm run dev` shows outdated styles after pulling changes, stop the dev server, delete `.next/dev` and start it again.
+
 ## GitHub Metrics
 
-Open **GitHub Metrics** in the sidebar or visit `/github-metrics`. This separate
+Open **GitHub metrics** in the navigation rail or visit `/github-metrics`. This separate
 page reads GitHub's REST reports, not the OTLP ledger. It includes:
 
 - Latest 28-day organization totals and daily prompt/generation trends.
@@ -99,12 +128,13 @@ page reads GitHub's REST reports, not the OTLP ledger. It includes:
   reported, and feature-use flags.
 - Model and feature activity, including generation/acceptance counts and lines
   added/deleted.
-- Model-usage pie chart with a selectable activity metric and a legend showing
-  values and percentages of the filtered model total. Zero values remain in
-  the legend without a slice; an all-zero selection shows an explicit message.
+- Model-usage ring chart with a selectable activity metric and a legend showing
+  values and percentages of the filtered model total. Segments use one ink in
+  stepped tones (in the same order as the legend) rather than a colour per model.
+  Zero values remain in the legend without a segment; an all-zero selection shows an explicit message.
   Chart metric
   and sort field/direction are independent; search and sorting apply to the
-  slices, legend, table, and CSV consistently. All matching models are included,
+  segments, legend, table, and CSV consistently. All matching models are included,
   with a scrollable legend and a stacked layout on smaller screens.
 - Per-user reported credits with expandable daily values and prompts.
 - User/model search; ascending/descending sorting for users, models, and
