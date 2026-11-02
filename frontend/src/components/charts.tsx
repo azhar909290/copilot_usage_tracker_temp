@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { displayDate, formatCompact, formatCount } from "@/lib/format";
 
@@ -46,28 +47,21 @@ export function Sparkline({ values, color, className, height = 30 }: { values: n
           <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
         </linearGradient>
       </defs>
-      {area && (
-        <motion.path
-          key={`a-${key}`}
-          className="area"
-          d={area}
-          fill={`url(#spark-${id})`}
-          initial={reduced ? false : { opacity: 0 }}
-          animate={{ opacity: 0.5 }}
-          transition={{ duration: 0.9, delay: 0.35, ease: EASE_OUT }}
+      <clipPath id={`spark-clip-${id}`}>
+        <motion.rect
+          key={`c-${key}`}
+          x={0}
+          y={-2}
+          height={height + 4}
+          initial={reduced ? false : { width: 0 }}
+          animate={{ width: 100 }}
+          transition={{ duration: 1.3, ease: EASE_OUT }}
         />
-      )}
-      {line && (
-        <motion.path
-          key={`l-${key}`}
-          className="line"
-          d={line}
-          style={{ stroke: color }}
-          initial={reduced ? false : { pathLength: 0 }}
-          animate={{ pathLength: 1 }}
-          transition={{ duration: 1.2, ease: EASE_OUT }}
-        />
-      )}
+      </clipPath>
+      <g clipPath={`url(#spark-clip-${id})`}>
+        {area && <path className="area" d={area} fill={`url(#spark-${id})`} />}
+        {line && <path className="line" d={line} style={{ stroke: color }} />}
+      </g>
     </svg>
   );
 }

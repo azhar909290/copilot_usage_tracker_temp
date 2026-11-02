@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowUpRight, ExternalLink, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatCompact, formatCount, formatMoney } from "@/lib/format";
 import type { CatalogAgent, UsageRow } from "@/lib/usage";
@@ -279,7 +280,7 @@ export function CatalogView({
                   data-idle={tile.requests === 0 || undefined}
                   style={{ "--h1": h1, "--h2": h2, "--h3": h3 } as CSSProperties}
                   initial={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateY(18px) scale(0.97)" }}
-                  animate={reduced ? { opacity: 1 } : { opacity: 1, transform: "translateY(0px) scale(1)" }}
+                  animate={{ opacity: 1, transform: "translateY(0px) scale(1)" }}
                   exit={reduced ? { opacity: 0 } : { opacity: 0, transform: "scale(0.96)", transition: { duration: 0.16 } }}
                   transition={{ duration: 0.5, delay: Math.min(index, 18) * 0.03, ease: [0.23, 1, 0.32, 1] }}
                   onClick={() => setOpen(tile.key)}
@@ -333,7 +334,7 @@ export function CatalogView({
               aria-label={active.title}
               style={{ "--h1": active.family.hues[0], "--h2": active.family.hues[1], "--h3": active.family.hues[2] } as CSSProperties}
               initial={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateX(40px)" }}
-              animate={reduced ? { opacity: 1 } : { opacity: 1, transform: "translateX(0px)" }}
+              animate={{ opacity: 1, transform: "translateX(0px)" }}
               exit={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateX(28px)", transition: { duration: 0.18 } }}
               transition={{ duration: 0.42, ease: [0.32, 0.72, 0, 1] }}
             >

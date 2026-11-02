@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { displayCallTime, formatCompact, formatCount, formatMoney, formatSeconds } from "@/lib/format";
+import { displayCallTime, displayDate, formatCompact, formatCount, formatMoney, formatSeconds } from "@/lib/format";
 import type { TeamData } from "@/lib/teams";
 import type { CallEvent, Share, Totals } from "@/lib/usage";
 import { Donut } from "./charts";
@@ -133,72 +133,120 @@ export function ModelsView({
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY = 86_400_000;
+const isoDay = (time: number) => new Date(time).toISOString().slice(0, 10);
 
-/** Weekday × hour heat field (local time). Hotter cells shift from aurora to ember. */
-function HeatField({ events }: { events: CallEvent[] }) {
-  const { grid, max, hours, peak } = useMemo(() => {
-    const grid = WEEKDAYS.map(() => new Array<number>(24).fill(0));
+/**
+ * A real calendar of the selected range: one row per week, one cell per receiver day, shaded by
+ * calls (aurora to ember). Below it, the hours of the day those calls fall in. Selecting a day
+ * filters the dashboard to it.
+ */
+function CallCalendar({ events, days, today, onPickDay }: { events: CallEvent[]; days: string[]; today: string; onPickDay: (date: string) => void }) {
+  const { counts, max, peakDay, weeks, hours, hourMax, peakHour } = useMemo(() => {
+    const counts = new Map<string, number>();
     const hours = new Array<number>(24).fill(0);
     for (const event of events) {
+      counts.set(event.date, (counts.get(event.date) ?? 0) + 1);
       const time = new Date(event.timestamp);
-      if (Number.isNaN(time.getTime())) continue;
-      const day = (time.getDay() + 6) % 7;
-      grid[day][time.getHours()] += 1;
-      hours[time.getHours()] += 1;
+      if (!Number.isNaN(time.getTime())) hours[time.getHours()] += 1;
     }
     let max = 0;
-    let peak = { day: 0, hour: 0 };
-    grid.forEach((row, day) =>
-      row.forEach((value, hour) => {
-        if (value > max) {
-          max = value;
-          peak = { day, hour };
-        }
-      }),
-    );
-    return { grid, max, hours, peak };
-  }, [events]);
-  const [hover, setHover] = useState<{ day: number; hour: number } | null>(null);
-  const read = hover ?? (max ? peak : null);
+    let peakDay = "";
+    for (const [date, value] of counts) {
+      if (value > max) {
+        max = value;
+        peakDay = date;
+      }
+    }
+    const first = days[0] ? Date.parse(`${days[0]}T00:00:00Z`) : 0;
+    const last = days.length ? Date.parse(`${days[days.length - 1]}T00:00:00Z`) : 0;
+    const weeks: { start: string; cells: { date: string; inRange: boolean }[] }[] = [];
+    if (days.length) {
+      const offset = (new Date(first).getUTCDay() + 6) % 7;
+      for (let start = first - offset * DAY; start <= last; start += 7 * DAY) {
+        weeks.push({
+          start: isoDay(start),
+          cells: Array.from({ length: 7 }, (_, index) => {
+            const time = start + index * DAY;
+            return { date: isoDay(time), inRange: time >= first && time <= last };
+          }),
+        });
+      }
+    }
+    const hourMax = Math.max(0, ...hours);
+    return { counts, max, peakDay, weeks, hours, hourMax, peakHour: hourMax ? hours.indexOf(hourMax) : -1 };
+  }, [events, days]);
+  const [hover, setHover] = useState<string | null>(null);
+  const shown = hover ?? (max ? peakDay : null);
+  let index = 0;
+
   return (
-    <div className="heat-wrap">
+    <div className="cal-wrap">
       <p className="ridge-readout" aria-live="polite">
-        {read ? (
+        {shown ? (
           <>
-            <span className="ridge-day">
-              {WEEKDAYS[read.day]} {String(read.hour).padStart(2, "0")}:00–{String((read.hour + 1) % 24).padStart(2, "0")}:00
-            </span>
-            <span className="num">{formatCount(grid[read.day][read.hour])} calls</span>
-            {!hover && <span>busiest hour in range</span>}
+            <span className="ridge-day">{displayDate(shown, { weekday: "short", month: "short", day: "numeric" })}</span>
+            <span className="num">{formatCount(counts.get(shown) ?? 0)} calls</span>
+            {!hover && <span>busiest day in range</span>}
           </>
         ) : (
-          <span>No timed calls in this range.</span>
+          <span>No calls in this range.</span>
         )}
       </p>
-      <div className="heat" role="img" aria-label={`Calls by weekday and hour, local time. Busiest: ${WEEKDAYS[peak.day]} at ${peak.hour}:00 with ${max} calls.`} onPointerLeave={() => setHover(null)}>
-        {grid.map((row, day) => (
-          <div key={WEEKDAYS[day]} style={{ display: "contents" }}>
-            <span className="heat-day">{WEEKDAYS[day]}</span>
-            {row.map((value, hour) => {
+      <div className="cal" role="group" aria-label="Calls per day. Select a day to filter the dashboard to it." onPointerLeave={() => setHover(null)}>
+        <div className="cal-head" aria-hidden="true">
+          <span />
+          {WEEKDAYS.map((day) => (
+            <span key={day}>{day}</span>
+          ))}
+        </div>
+        {weeks.map((week) => (
+          <div className="cal-week" key={week.start}>
+            <span className="cal-label num">{displayDate(week.start, { month: "short", day: "numeric" })}</span>
+            {week.cells.map((cell) => {
+              if (!cell.inRange) return <span className="cal-cell is-out" key={cell.date} aria-hidden="true" />;
+              const value = counts.get(cell.date) ?? 0;
               const level = max ? Math.sqrt(value / max) : 0;
+              const order = index++;
               return (
-                <span
-                  key={hour}
-                  className="heat-cell"
+                <button
+                  key={cell.date}
+                  type="button"
+                  className="cal-cell"
                   data-hot={level > 0.6 || undefined}
-                  style={{ "--v": level.toFixed(3), "--d": day, "--h": hour } as CSSProperties}
-                  onPointerEnter={() => setHover({ day, hour })}
-                />
+                  data-today={cell.date === today || undefined}
+                  data-empty={value === 0 || undefined}
+                  style={{ "--v": level.toFixed(3), "--i": order } as CSSProperties}
+                  aria-label={`${displayDate(cell.date, { weekday: "long", month: "long", day: "numeric" })}: ${formatCount(value)} calls`}
+                  onPointerEnter={() => setHover(cell.date)}
+                  onFocus={() => setHover(cell.date)}
+                  onClick={() => onPickDay(cell.date)}
+                >
+                  <span className="cal-date">{Number(cell.date.slice(8))}</span>
+                  {value > 0 && <span className="cal-count num">{formatCount(value)}</span>}
+                </button>
               );
             })}
           </div>
         ))}
       </div>
-      <div className="heat-hours" aria-hidden="true">
-        <span />
-        {hours.map((_, hour) => (
-          <span key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>
-        ))}
+      <div className="cal-hours" role="img" aria-label={peakHour >= 0 ? `Calls by hour of the day, local time. Busiest hour ${String(peakHour).padStart(2, "0")}:00 with ${hourMax} calls.` : "No timed calls."}>
+        <span className="cal-hours-title">Hour of day</span>
+        <div className="cal-bars">
+          {hours.map((value, hour) => (
+            <i
+              key={hour}
+              data-peak={hour === peakHour || undefined}
+              title={`${String(hour).padStart(2, "0")}:00 · ${formatCount(value)} calls`}
+              style={{ "--h": hourMax ? Math.max(value ? 0.06 : 0, value / hourMax) : 0, "--i": hour } as CSSProperties}
+            />
+          ))}
+        </div>
+        <div className="cal-ticks" aria-hidden="true">
+          {hours.map((_, hour) => (
+            <span key={hour}>{hour % 6 === 0 ? String(hour).padStart(2, "0") : ""}</span>
+          ))}
+        </div>
       </div>
       <div className="heat-scale">
         Fewer <i aria-hidden="true" /> More calls
@@ -213,12 +261,18 @@ export function ActivityView({
   currency,
   hues,
   teams,
+  days,
+  today,
+  onPickDay,
 }: {
   events: CallEvent[];
   loading: boolean;
   currency: string;
   hues: Map<string, number>;
   teams: TeamData | null;
+  days: string[];
+  today: string;
+  onPickDay: (date: string) => void;
 }) {
   type Key = "timestamp" | "user" | "agent" | "model" | "input_tokens" | "output_tokens" | "total_tokens" | "latency_ms" | "cost";
   const [sort, onSort] = useSort<Key>({ key: "timestamp", direction: "desc" }, ["user", "agent", "model"]);
@@ -237,15 +291,27 @@ export function ActivityView({
 
   return (
     <>
+      <Reveal as="section" className="block neural-block">
+        <header className="block-head">
+          <div className="block-title">
+            <h2>Signal network</h2>
+            <p>How calls flow from teams to people, agents and models. Link width and signal pace follow call volume.</p>
+          </div>
+          <span className="muted">
+            <span className="num">{formatCount(events.length)}</span> calls traced
+          </span>
+        </header>
+        <NeuralFlow events={events} teams={teams} />
+      </Reveal>
       <div className="activity-pair">
         <Reveal as="section" className="block">
           <header className="block-head">
             <div className="block-title">
-              <h2>When the organization works</h2>
-              <p>Calls by weekday and hour, in your local time</p>
+              <h2>Activity calendar</h2>
+              <p>Calls per receiver day. Select a day to open its calls.</p>
             </div>
           </header>
-          <HeatField events={events} />
+          <CallCalendar events={events} days={days} today={today} onPickDay={onPickDay} />
         </Reveal>
         <Reveal as="section" className="block" delay={0.08}>
           <header className="block-head">
@@ -271,18 +337,6 @@ export function ActivityView({
           )}
         </Reveal>
       </div>
-      <Reveal as="section" className="block neural-block">
-        <header className="block-head">
-          <div className="block-title">
-            <h2>Signal network</h2>
-            <p>How calls flow from teams to people, agents and models. Link width and signal pace follow call volume.</p>
-          </div>
-          <span className="muted">
-            <span className="num">{formatCount(events.length)}</span> calls traced
-          </span>
-        </header>
-        <NeuralFlow events={events} teams={teams} />
-      </Reveal>
       <Reveal as="section" className="block">
         <header className="block-head">
           <div className="block-title">

@@ -1,11 +1,12 @@
 "use client";
 
-import { motion, useReducedMotion, type Variants } from "motion/react";
+import { motion, type Variants } from "motion/react";
+import { useReducedMotion } from "@/lib/motion";
 import type { CSSProperties, ReactNode } from "react";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
-/** One-time entrance as a section scrolls into view: rise, fade and de-blur. */
+/** One-time, compositor-friendly entrance as a section scrolls into view. */
 export function Reveal({
   children,
   delay = 0,
@@ -25,10 +26,10 @@ export function Reveal({
     <Tag
       className={className}
       style={style}
-      initial={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateY(18px)", filter: "blur(6px)" }}
-      whileInView={reduced ? { opacity: 1 } : { opacity: 1, transform: "translateY(0px)", filter: "blur(0px)" }}
+      initial={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateY(12px)" }}
+      whileInView={{ opacity: 1, transform: "translateY(0px)" }}
       viewport={{ once: true, margin: "-40px" }}
-      transition={{ duration: reduced ? 0.2 : 0.62, delay, ease: EASE_OUT }}
+      transition={{ duration: reduced ? 0.15 : 0.4, delay, ease: EASE_OUT }}
     >
       {children}
     </Tag>
@@ -47,7 +48,7 @@ export const staggerItem: Variants = {
 
 export const staggerFade: Variants = {
   hidden: { opacity: 0 },
-  shown: { opacity: 1, transition: { duration: 0.2 } },
+  shown: { opacity: 1, transform: "translateY(0px) scale(1)", transition: { duration: 0.2 } },
 };
 
 /** Staggers its StaggerItem children (40–70ms apart) when the group enters the viewport. */

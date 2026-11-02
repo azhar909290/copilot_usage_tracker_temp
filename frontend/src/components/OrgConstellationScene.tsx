@@ -3,6 +3,7 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 import * as THREE from "three";
+import { useCappedInvalidate } from "@/lib/animation";
 
 export type ConstellationMember = { user: string; tokens: number; requests: number; cost: number };
 export type ConstellationTeam = {
@@ -28,6 +29,7 @@ export type ConstellationSceneProps = {
   labelLayer: RefObject<HTMLDivElement | null>;
   onHover: (hover: ConstellationHover | null) => void;
   onSelect: (team: string | null) => void;
+  onPickMember: (team: string, user: string) => void;
 };
 
 const ORBIT = 3.9;
@@ -94,16 +96,27 @@ function avatarTexture(name: string, color: string, light: boolean) {
   return texture;
 }
 
-function circlePoints(radius: number, segments = 128) {
-  const points: THREE.Vector3[] = [];
-  for (let index = 0; index <= segments; index += 1) {
-    const angle = (index / segments) * Math.PI * 2;
-    points.push(new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+type FadeMaterial = THREE.Material & { opacity: number; userData: { base?: number } };
+const fadeCache = new WeakMap<THREE.Object3D, FadeMaterial[]>();
+
+/** Materials under a group, collected once so the frame loop doesn't walk the scene graph. */
+function fadeMaterials(root: THREE.Object3D) {
+  let list = fadeCache.get(root);
+  if (!list) {
+    list = [];
+    root.traverse((child) => {
+      const material = (child as THREE.Mesh).material as FadeMaterial | undefined;
+      if (material && "opacity" in material) list!.push(material);
+    });
+    fadeCache.set(root, list);
   }
-  return points;
+  return list;
 }
 
-type MemberLayout = { radius: number; phase: number; speed: number; tilt: THREE.Euler; size: number; active: boolean };
+/** Decorative layers must not swallow pointer events meant for member badges. */
+const noHit = () => {};
+
+type MemberLayout = { radius: number; phase: number; height: number; size: number; active: boolean };
 
 function Constellation({
   teams,
@@ -116,6 +129,7 @@ function Constellation({
   labelLayer,
   onHover,
   onSelect,
+  onPickMember,
 }: ConstellationSceneProps) {
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const size = useThree((state) => state.size);
@@ -138,19 +152,17 @@ function Constellation({
   const maxMemberTokens = Math.max(1, ...teams.flatMap((team) => team.members.map((member) => member.tokens)));
 
   const layout = useMemo(() => {
-    const random = seeded(20261031);
     return teams.map((team, index) => {
       const angle = (index / teams.length) * Math.PI * 2 - Math.PI / 2;
       const radius = 0.26 + 0.3 * Math.sqrt(team.tokens / maxTeamTokens);
       const members: MemberLayout[] = team.members.map((member, position) => ({
-        radius: radius + 0.62 + (position % 3) * 0.3 + random() * 0.08,
-        phase: (position / Math.max(1, team.members.length)) * Math.PI * 2 + random() * 0.4,
-        speed: (0.22 + random() * 0.28) * (position % 2 ? -1 : 1),
-        tilt: new THREE.Euler((random() - 0.5) * 1.1, 0, (random() - 0.5) * 1.1),
-        size: member.tokens > 0 ? 0.36 + 0.42 * Math.sqrt(member.tokens / maxMemberTokens) : 0.3,
+        radius: 0.9 + Math.floor(position / 5) * 0.5,
+        phase: angle + ((position % 5) - (Math.min(5, team.members.length - Math.floor(position / 5) * 5) - 1) / 2) * 0.55,
+        height: 0.38 + Math.floor(position / 5) * 0.18,
+        size: member.tokens > 0 ? 0.32 + 0.25 * Math.sqrt(member.tokens / maxMemberTokens) : 0.28,
         active: member.requests > 0,
       }));
-      return { angle, radius, members, home: new THREE.Vector3(Math.cos(angle) * ORBIT, 0, Math.sin(angle) * ORBIT) };
+      return { angle, radius, members };
     });
   }, [teams, maxTeamTokens, maxMemberTokens]);
 
@@ -165,7 +177,7 @@ function Constellation({
     const random = seeded(7);
     const positions = new Float32Array(700 * 3);
     for (let index = 0; index < 700; index += 1) {
-      const radius = 12 + random() * 14;
+      const radius = 30 + random() * 16;
       const theta = random() * Math.PI * 2;
       const phi = Math.acos(2 * random() - 1);
       positions.set([radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi) * 0.7, radius * Math.sin(phi) * Math.sin(theta)], index * 3);
@@ -176,19 +188,11 @@ function Constellation({
   }, []);
   useEffect(() => () => stars.dispose(), [stars]);
 
-  const orbitGeometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(circlePoints(ORBIT, 180)), []);
-  const unitRing = useMemo(() => new THREE.BufferGeometry().setFromPoints(circlePoints(1, 96)), []);
-  useEffect(() => () => {
-    orbitGeometry.dispose();
-    unitRing.dispose();
-  }, [orbitGeometry, unitRing]);
-
   const coreRef = useRef<THREE.Group>(null);
   const starsRef = useRef<THREE.Points>(null);
   const teamRefs = useRef<(THREE.Group | null)[]>([]);
   const beamRefs = useRef<(THREE.Line | null)[]>([]);
   const memberRefs = useRef<(THREE.Group | null)[][]>([]);
-  const ringRefs = useRef<(THREE.Line | null)[][]>([]);
   const positions = useRef<THREE.Vector3[]>([]);
   const projected = useMemo(() => new THREE.Vector3(), []);
   const scratch = useMemo(() => new THREE.Vector3(), []);
@@ -223,7 +227,8 @@ function Constellation({
     };
   }, [gl, invalidate]);
 
-  useEffect(() => invalidate(), [size.width, size.height, selected, light, invalidate]);
+  useEffect(() => invalidate(), [size.width, size.height, selected, light, running, reducedMotion, invalidate]);
+  const drift = useCappedInvalidate(invalidate);
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 1 / 20);
@@ -231,35 +236,28 @@ function Constellation({
     const time = reducedMotion ? 0 : state.clock.elapsedTime;
     const selectedIndex = selected ? teams.findIndex((team) => team.name === selected) : -1;
 
-    if (!reducedMotion && !view.current.drag && running) view.current.yaw += delta * 0.06;
+    if (!reducedMotion && !view.current.drag && running) view.current.yaw += delta * 0.025;
 
     const core = coreRef.current;
     if (core) {
       const t = easeOut(elapsed / 700);
       core.scale.setScalar(0.6 + 0.4 * t);
-      core.rotation.y = time * 0.35;
-      core.rotation.x = Math.sin(time * 0.4) * 0.2;
+      core.rotation.y = time * 0.08;
     }
     if (starsRef.current) starsRef.current.rotation.y = time * 0.01;
 
     layout.forEach((team, index) => {
       const group = teamRefs.current[index];
       const t = easeOut((elapsed - 220 - index * 120) / 1100);
-      const angle = team.angle + (reducedMotion ? 0 : Math.sin(time * 0.15 + index) * 0.02);
+      const angle = team.angle;
       const position = (positions.current[index] ??= new THREE.Vector3());
-      position.set(Math.cos(angle) * ORBIT * t, Math.sin(time * 0.6 + index) * 0.08, Math.sin(angle) * ORBIT * t);
+      position.set(Math.cos(angle) * ORBIT * t, 0, Math.sin(angle) * ORBIT * t);
       const dim = selectedIndex >= 0 && selectedIndex !== index;
       if (group) {
         group.position.copy(position);
-        const pulse = 1 + (reducedMotion ? 0 : Math.sin(time * 1.6 + index) * 0.04);
-        group.scale.setScalar((0.6 + 0.4 * t) * pulse * (selectedIndex === index ? 1.18 : 1));
-        group.traverse((child) => {
-          const material = (child as THREE.Mesh).material as THREE.Material & { opacity: number; userData: { base?: number } };
-          if (material && "opacity" in material) {
-            const base = material.userData.base ?? 1;
-            material.opacity = base * t * (dim ? 0.28 : 1);
-          }
-        });
+        group.scale.setScalar((0.6 + 0.4 * t) * (selectedIndex === index ? 1.08 : 1));
+        const opacity = t * (dim ? 0.28 : 1);
+        for (const material of fadeMaterials(group)) material.opacity = (material.userData.base ?? 1) * opacity;
       }
       const beam = beamRefs.current[index];
       if (beam) {
@@ -270,26 +268,14 @@ function Constellation({
       }
       team.members.forEach((member, position2) => {
         const node = memberRefs.current[index]?.[position2];
-        const ring = ringRefs.current[index]?.[position2];
         const m = easeOut((elapsed - 760 - index * 120 - position2 * 45) / 800);
-        const angle2 = member.phase + time * member.speed;
-        scratch.set(Math.cos(angle2) * member.radius * m, 0, Math.sin(angle2) * member.radius * m).applyEuler(member.tilt);
+        const angle2 = member.phase;
+        scratch.set(Math.cos(angle2) * member.radius * m, member.height * m + Math.sin(time * 0.7 + position2) * 0.025, Math.sin(angle2) * member.radius * m);
         if (node) {
           node.position.copy(position).add(scratch);
           node.scale.setScalar(0.6 + 0.4 * m);
-          node.traverse((child) => {
-            const material = (child as THREE.Mesh).material as THREE.Material & { opacity: number; userData: { base?: number } };
-            if (material && "opacity" in material) {
-              const base = material.userData.base ?? 1;
-              material.opacity = base * m * (member.active ? 1 : 0.4) * (dim ? 0.25 : 1);
-            }
-          });
-        }
-        if (ring) {
-          ring.position.copy(position);
-          ring.rotation.copy(member.tilt);
-          ring.scale.setScalar(member.radius * m);
-          (ring.material as THREE.LineBasicMaterial).opacity = (light ? 0.22 : 0.12) * m * (dim ? 0.3 : 1);
+          const opacity = m * (member.active ? 1 : 0.4) * (dim ? 0.25 : 1);
+          for (const material of fadeMaterials(node)) material.opacity = (material.userData.base ?? 1) * opacity;
         }
       });
     });
@@ -316,12 +302,12 @@ function Constellation({
       for (const element of Array.from(layer.children) as HTMLElement[]) {
         const team = element.dataset.team;
         if (team === undefined) {
-          projected.set(0, 1.05, 0);
+          projected.set(0, 1.5, 0);
         } else {
           const index = Number(team);
           const position = positions.current[index];
           if (!position) continue;
-          projected.copy(position).add(scratch.set(0, layout[index].radius + 0.32, 0));
+          projected.copy(position).add(scratch.set(0, 1.25, 0));
         }
         projected.project(camera);
         const x = ((projected.x + 1) / 2) * size.width;
@@ -332,8 +318,10 @@ function Constellation({
       }
     }
 
-    if (running && !reducedMotion) invalidate();
-    else if (elapsed < 2600 || Math.abs(goalDistance - focus.current.distance) > 0.01) invalidate();
+    const settling = Math.abs(goalDistance - focus.current.distance) > 0.01;
+    if (!running) return;
+    if (view.current.drag || settling || elapsed < 2600) invalidate();
+    else if (!reducedMotion) drift();
   });
 
   const hover = (value: ConstellationHover | null) => (event: ThreeEvent<PointerEvent>) => {
@@ -346,27 +334,21 @@ function Constellation({
   return (
     <>
       <points ref={starsRef} geometry={stars}>
-        <pointsMaterial color={starColor} size={0.06} sizeAttenuation transparent opacity={light ? 0.35 : 0.55} depthWrite={false} />
+        <pointsMaterial color={starColor} map={texture} size={0.22} sizeAttenuation transparent opacity={light ? 0.35 : 0.55} depthWrite={false} />
       </points>
-      <lineLoop geometry={orbitGeometry}>
-        <lineBasicMaterial color={c2} transparent opacity={light ? 0.35 : 0.22} depthWrite={false} />
-      </lineLoop>
       <group ref={coreRef} onPointerOver={hover({ kind: "org" })} onPointerOut={hover(null)} onClick={(event) => { event.stopPropagation(); onSelect(null); }}>
-        <mesh>
-          <icosahedronGeometry args={[0.78, 1]} />
-          <meshBasicMaterial color={c2} wireframe transparent opacity={0.75} />
-        </mesh>
-        <mesh>
-          <icosahedronGeometry args={[0.46, 0]} />
-          <meshBasicMaterial color={c1} transparent opacity={0.95} />
-        </mesh>
-        <mesh rotation={[Math.PI / 2.4, 0, 0]}>
-          <torusGeometry args={[1.08, 0.012, 8, 96]} />
-          <meshBasicMaterial color={c3} transparent opacity={0.7} />
-        </mesh>
-        <sprite scale={[4.2, 4.2, 1]}>
-          <spriteMaterial map={texture} color={c2} transparent opacity={light ? 0.35 : 0.8} depthWrite={false} blending={blending} />
-        </sprite>
+        {[c1, c2, c3].map((color, index) => (
+          <group key={index} position={[0, index * 0.34, 0]} rotation={[0, index * Math.PI / 6, 0]}>
+            <mesh>
+              <cylinderGeometry args={[0.9 - index * 0.15, 0.9 - index * 0.15, 0.2, 6]} />
+              <meshBasicMaterial color={color} transparent opacity={light ? 0.7 : 0.5} />
+            </mesh>
+            <mesh>
+              <cylinderGeometry args={[0.91 - index * 0.15, 0.91 - index * 0.15, 0.21, 6]} />
+              <meshBasicMaterial color={color} wireframe transparent opacity={0.9} />
+            </mesh>
+          </group>
+        ))}
       </group>
       {teams.map((team, index) => (
         <group key={team.name}>
@@ -391,28 +373,24 @@ function Constellation({
               onSelect(selected === team.name ? null : team.name);
             }}
           >
-            <mesh>
-              <sphereGeometry args={[layout[index]?.radius ?? 0.4, 40, 40]} />
-              <meshBasicMaterial color={team.color} transparent opacity={1} />
+            <mesh position={[0, -0.2, 0]}>
+              <cylinderGeometry args={[1.7, 1.7, 0.12, 6]} />
+              <meshBasicMaterial color={team.color} transparent opacity={light ? 0.22 : 0.13} userData={{ base: light ? 0.22 : 0.13 }} />
             </mesh>
-            <mesh>
-              <sphereGeometry args={[(layout[index]?.radius ?? 0.4) * 1.32, 24, 24]} />
-              <meshBasicMaterial color={team.color} wireframe transparent opacity={0.22} userData={{ base: 0.22 }} />
+            <mesh position={[0, -0.2, 0]} raycast={noHit}>
+              <cylinderGeometry args={[1.71, 1.71, 0.13, 6]} />
+              <meshBasicMaterial color={team.color} wireframe transparent opacity={0.4} userData={{ base: 0.4 }} />
             </mesh>
-            <sprite scale={[(layout[index]?.radius ?? 0.4) * 6, (layout[index]?.radius ?? 0.4) * 6, 1]}>
+            <mesh position={[0, 0.12, 0]}>
+              <cylinderGeometry args={[layout[index]?.radius ?? 0.4, layout[index]?.radius ?? 0.4, 0.5, 6]} />
+              <meshBasicMaterial color={team.color} transparent opacity={0.9} userData={{ base: 0.9 }} />
+            </mesh>
+            <sprite raycast={noHit} scale={[(layout[index]?.radius ?? 0.4) * 6, (layout[index]?.radius ?? 0.4) * 6, 1]}>
               <spriteMaterial map={texture} color={team.color} transparent opacity={light ? 0.4 : 0.85} depthWrite={false} blending={blending} userData={{ base: light ? 0.4 : 0.85 }} />
             </sprite>
           </group>
           {team.members.map((member, position) => (
             <group key={member.user}>
-              <lineLoop
-                ref={(node) => {
-                  (ringRefs.current[index] ??= [])[position] = node as unknown as THREE.Line | null;
-                }}
-                geometry={unitRing}
-              >
-                <lineBasicMaterial color={team.color} transparent opacity={0} depthWrite={false} />
-              </lineLoop>
               <group
                 ref={(node) => {
                   (memberRefs.current[index] ??= [])[position] = node;
@@ -421,7 +399,7 @@ function Constellation({
                 onPointerOut={hover(null)}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onSelect(team.name);
+                  onPickMember(team.name, member.user);
                 }}
               >
                 <sprite scale={[(layout[index]?.members[position]?.size ?? 0.3) * 2.2, (layout[index]?.members[position]?.size ?? 0.3) * 2.2, 1]}>
@@ -444,7 +422,7 @@ export default function OrgConstellationScene(props: ConstellationSceneProps) {
     <Canvas
       className="constellation-canvas"
       frameloop="demand"
-      dpr={[1, 2]}
+      dpr={[1, 1.5]}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       camera={{ fov: 38, near: 0.1, far: 120, position: [0, 6, 12] }}
       onPointerMissed={() => props.onSelect(null)}

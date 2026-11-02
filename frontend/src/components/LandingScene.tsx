@@ -3,6 +3,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { useCappedInvalidate } from "@/lib/animation";
 
 export type LandingSceneProps = {
   colors: { calls: string; tokens: string; cost: string; rose: string; lime: string; sky: string; text: string };
@@ -12,8 +13,7 @@ export type LandingSceneProps = {
   running: boolean;
 };
 
-const PLANE_Y = [-1.25, -0.25, 0.75];
-const CORE_Y = 2.15;
+const CORE_Y = 0;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const easeOut = (t: number) => 1 - Math.pow(1 - clamp(t, 0, 1), 4);
 
@@ -42,44 +42,38 @@ function glowTexture() {
   return texture;
 }
 
-/** A square control plane: translucent fill, a fine grid and a brighter rim. */
-function ControlPlane({ color, light }: { color: string; light: boolean }) {
-  const grid = useMemo(() => {
-    const helper = new THREE.GridHelper(5.4, 18, color, color);
-    const material = helper.material as THREE.LineBasicMaterial;
-    material.transparent = true;
-    material.opacity = light ? 0.35 : 0.22;
-    material.depthWrite = false;
-    return helper;
-  }, [color, light]);
-  const rim = useMemo(() => {
-    const half = 2.7;
-    const points = [
-      new THREE.Vector3(-half, 0, -half),
-      new THREE.Vector3(half, 0, -half),
-      new THREE.Vector3(half, 0, half),
-      new THREE.Vector3(-half, 0, half),
-    ];
-    return new THREE.BufferGeometry().setFromPoints(points);
-  }, []);
-  useEffect(
-    () => () => {
-      grid.geometry.dispose();
-      (grid.material as THREE.Material).dispose();
-      rim.dispose();
-    },
-    [grid, rim],
-  );
+function SignalRing({ color, radius, light }: { color: string; radius: number; light: boolean }) {
+  const ticks = useRef<THREE.InstancedMesh>(null);
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    const mesh = ticks.current;
+    if (!mesh) return;
+    const instance = new THREE.Object3D();
+    for (let index = 0; index < 24; index += 1) {
+      const angle = index / 24 * Math.PI * 2;
+      instance.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+      instance.rotation.z = angle;
+      instance.scale.set(index % 6 === 0 ? 0.18 : 0.07, 0.018, 0.018);
+      instance.updateMatrix();
+      mesh.setMatrixAt(index, instance.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    invalidate();
+  }, [radius, invalidate]);
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[5.4, 5.4]} />
-        <meshBasicMaterial color={color} transparent opacity={light ? 0.1 : 0.07} side={THREE.DoubleSide} depthWrite={false} />
+      <mesh>
+        <torusGeometry args={[radius, 0.018, 6, 128]} />
+        <meshBasicMaterial color={color} />
       </mesh>
-      <primitive object={grid} />
-      <lineLoop geometry={rim}>
-        <lineBasicMaterial color={color} transparent opacity={0.9} />
-      </lineLoop>
+      <mesh>
+        <ringGeometry args={[radius - 0.09, radius + 0.09, 128]} />
+        <meshBasicMaterial color={color} transparent opacity={light ? 0.14 : 0.1} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <instancedMesh ref={ticks} args={[undefined, undefined, 24]} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial color={color} />
+      </instancedMesh>
     </group>
   );
 }
@@ -91,8 +85,8 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
   const started = useRef(0);
   const rootRef = useRef<THREE.Group>(null);
   const coreRef = useRef<THREE.Group>(null);
-  const planeRefs = useRef<(THREE.Group | null)[]>([]);
-  const nodeRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const ringRefs = useRef<(THREE.Group | null)[]>([]);
+  const nodesRef = useRef<THREE.InstancedMesh>(null);
   const particlesRef = useRef<THREE.Points>(null);
   const beamsRef = useRef<THREE.LineSegments>(null);
   const parallax = useRef({ x: 0, y: 0 });
@@ -102,6 +96,8 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
     started.current = performance.now();
     invalidate();
   }, [invalidate]);
+  useEffect(() => invalidate(), [running, reducedMotion, invalidate]);
+  const drift = useCappedInvalidate(invalidate);
 
   const family = useMemo(() => [colors.calls, colors.tokens, colors.cost, colors.lime, colors.rose], [colors]);
   const count = clamp(agents || 63, 12, 90);
@@ -109,19 +105,28 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
     const random = seeded(63);
     return Array.from({ length: count }, (_, index) => {
       const ring = index % 4;
-      const radius = 1.25 + ring * 0.42 + random() * 0.18;
+      const radius = 1.7 + ring * 0.25 + random() * 0.1;
       const angle = (index / count) * Math.PI * 2 * 3 + random() * 0.4;
       return {
         radius,
         angle,
         speed: 0.08 + (3 - ring) * 0.035,
-        height: 1.15 + random() * 0.55,
+        height: (random() - 0.5) * 2.6,
         color: family[index % family.length],
         phase: random() * Math.PI * 2,
         size: 0.045 + random() * 0.05,
       };
     });
   }, [count, family]);
+  const instance = useMemo(() => new THREE.Object3D(), []);
+  useEffect(() => {
+    const mesh = nodesRef.current;
+    if (!mesh) return;
+    const color = new THREE.Color();
+    nodes.forEach((node, index) => mesh.setColorAt(index, color.set(node.color)));
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    invalidate();
+  }, [nodes, invalidate]);
 
   const particles = useMemo(() => {
     const random = seeded(7);
@@ -169,16 +174,17 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
   );
 
   useEffect(() => {
+    if (!running || reducedMotion) return;
     const onMove = (event: PointerEvent) => {
       parallax.current = { x: (event.clientX / window.innerWidth) * 2 - 1, y: (event.clientY / window.innerHeight) * 2 - 1 };
       invalidate();
     };
     window.addEventListener("pointermove", onMove);
     return () => window.removeEventListener("pointermove", onMove);
-  }, [invalidate]);
+  }, [running, reducedMotion, invalidate]);
 
   const position = useMemo(() => new THREE.Vector3(), []);
-  const look = useMemo(() => new THREE.Vector3(0, 0.55, 0), []);
+  const look = useMemo(() => new THREE.Vector3(0, 0, 0), []);
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 1 / 20);
@@ -186,12 +192,12 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
     const time = reducedMotion ? 0 : state.clock.elapsedTime;
 
     if (rootRef.current) rootRef.current.rotation.y = reducedMotion ? 0.5 : 0.5 + time * 0.07;
-    planeRefs.current.forEach((plane, index) => {
-      if (!plane) return;
+    ringRefs.current.forEach((ring, index) => {
+      if (!ring) return;
       const t = easeOut((elapsed - index * 180) / 1400);
-      plane.position.y = PLANE_Y[index] - (1 - t) * 2.4 + Math.sin(time * 0.8 + index) * 0.04;
-      plane.scale.setScalar(0.85 + 0.15 * t);
-      plane.visible = t > 0.001;
+      ring.rotation.set(0.7 + index * 0.65 + Math.sin(time * 0.2) * 0.1, index * 0.8 + time * (index % 2 ? -0.08 : 0.06), index * 0.4);
+      ring.scale.setScalar(0.65 + 0.35 * t);
+      ring.visible = t > 0.001;
     });
     if (coreRef.current) {
       const t = easeOut((elapsed - 650) / 1000);
@@ -206,17 +212,17 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
     const beamAttribute = beamGeometry?.attributes.position as THREE.BufferAttribute | undefined;
     const reveal = easeOut((elapsed - 900) / 1200);
     nodes.forEach((node, index) => {
-      const mesh = nodeRefs.current[index];
       const angle = node.angle + time * node.speed;
       position.set(Math.cos(angle) * node.radius * reveal, node.height + Math.sin(time * 1.3 + node.phase) * 0.07, Math.sin(angle) * node.radius * reveal);
-      if (mesh) {
-        mesh.position.copy(position);
-        mesh.rotation.set(time + node.phase, time * 0.7, 0);
-        mesh.scale.setScalar(0.4 + 0.6 * reveal);
-      }
+      instance.position.copy(position);
+      instance.rotation.set(time + node.phase, time * 0.7, 0);
+      instance.scale.setScalar(node.size * (0.4 + 0.6 * reveal));
+      instance.updateMatrix();
+      nodesRef.current?.setMatrixAt(index, instance.matrix);
       beamAttribute?.setXYZ(index * 2, position.x, position.y, position.z);
       beamAttribute?.setXYZ(index * 2 + 1, 0, CORE_Y, 0);
     });
+    if (nodesRef.current) nodesRef.current.instanceMatrix.needsUpdate = true;
     const beamsObject = beamsRef.current;
     if (beamsObject) {
       beamsObject.geometry.attributes.position.needsUpdate = true;
@@ -243,63 +249,53 @@ function Scene({ colors, light, agents, reducedMotion, running }: LandingScenePr
     const aspect = size.width / Math.max(1, size.height);
     const distance = aspect < 0.9 ? 13.5 : aspect < 1.25 ? 11.5 : 10.2;
     const goalX = parallax.current.x * 0.9;
-    const goalY = 4.2 - parallax.current.y * 0.6;
+    const goalY = 2.8 - parallax.current.y * 0.6;
     const follow = reducedMotion ? 1 : 1 - Math.exp(-delta * 2.5);
     const { x, y, z } = camera.position;
     camera.position.set(x + (goalX - x) * follow, y + (goalY - y) * follow, z + (distance - z) * follow);
     camera.lookAt(look);
 
-    if (running && !reducedMotion) invalidate();
-    else if (elapsed < 3000) invalidate();
+    if (running && !reducedMotion) {
+      if (elapsed < 3200) invalidate();
+      else drift();
+    }
   });
 
   const blending = light ? THREE.NormalBlending : THREE.AdditiveBlending;
-  const planeColors = [colors.cost, colors.tokens, colors.calls];
+  const ringColors = [colors.cost, colors.tokens, colors.calls];
   return (
     <>
       <points geometry={stars}>
         <pointsMaterial color={colors.text} size={0.05} sizeAttenuation transparent opacity={light ? 0.25 : 0.45} depthWrite={false} />
       </points>
       <group ref={rootRef}>
-        {planeColors.map((color, index) => (
+        {ringColors.map((color, index) => (
           <group
             key={index}
             ref={(node) => {
-              planeRefs.current[index] = node;
+              ringRefs.current[index] = node;
             }}
-            position={[0, PLANE_Y[index], 0]}
           >
-            <ControlPlane color={color} light={light} />
+            <SignalRing color={color} radius={2.6 + index * 0.34} light={light} />
           </group>
         ))}
-        <mesh position={[0, (PLANE_Y[0] + CORE_Y) / 2, 0]}>
-          <cylinderGeometry args={[0.025, 0.025, CORE_Y - PLANE_Y[0], 8]} />
-          <meshBasicMaterial color={colors.calls} transparent opacity={0.5} />
-        </mesh>
         <lineSegments ref={beamsRef} geometry={beams}>
           <lineBasicMaterial color={colors.tokens} transparent opacity={0} depthWrite={false} />
         </lineSegments>
-        {nodes.map((node, index) => (
-          <mesh
-            key={index}
-            ref={(mesh) => {
-              nodeRefs.current[index] = mesh;
-            }}
-          >
-            <octahedronGeometry args={[node.size, 0]} />
-            <meshBasicMaterial color={node.color} />
-          </mesh>
-        ))}
+        <instancedMesh ref={nodesRef} args={[undefined, undefined, count]} frustumCulled={false}>
+          <octahedronGeometry args={[1, 0]} />
+          <meshBasicMaterial />
+        </instancedMesh>
         <points ref={particlesRef} geometry={particles.geometry}>
           <pointsMaterial size={0.07} vertexColors transparent opacity={0} depthWrite={false} blending={blending} map={texture} />
         </points>
         <group ref={coreRef} position={[0, CORE_Y, 0]}>
           <mesh>
-            <icosahedronGeometry args={[0.62, 1]} />
+            <octahedronGeometry args={[0.92, 0]} />
             <meshBasicMaterial color={colors.tokens} wireframe transparent opacity={0.8} />
           </mesh>
           <mesh>
-            <icosahedronGeometry args={[0.36, 0]} />
+            <octahedronGeometry args={[0.48, 0]} />
             <meshBasicMaterial color={colors.calls} />
           </mesh>
           <mesh rotation={[Math.PI / 2.3, 0, 0]}>
@@ -320,7 +316,7 @@ export default function LandingScene(props: LandingSceneProps) {
     <Canvas
       className="landing-canvas"
       frameloop="demand"
-      dpr={[1, 2]}
+      dpr={[1, 1.5]}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       camera={{ fov: 36, near: 0.1, far: 120, position: [0, 4.2, 11] }}
     >

@@ -35,7 +35,7 @@ export const viewport: Viewport = {
 };
 
 // Applies the saved theme before first paint so light-mode users never see a dark flash.
-const themeBootstrap = `try{if(localStorage.getItem("signal-theme")==="light"){document.documentElement.dataset.theme="light"}}catch(e){}`;
+const themeBootstrap = `try{var d=document.documentElement;if(localStorage.getItem("signal-theme")==="light"){d.dataset.theme="light"}d.dataset.motion=localStorage.getItem("signal-motion")==="off"?"reduced":"full"}catch(e){}`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import NumberFlow from "@number-flow/react";
+import { CountUp } from "@/components/CountUp";
 import {
   Activity,
   ArrowDownToLine,
@@ -22,9 +22,12 @@ import {
   TriangleAlert,
   Users,
   X,
+  Zap,
+  ZapOff,
   type LucideIcon,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useMotionToggle, useReducedMotion } from "@/lib/motion";
 import { useRouter } from "next/navigation";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { BootLoader, type BootStage } from "@/components/BootLoader";
@@ -169,7 +172,7 @@ function FilterSelect({
 
 export default function Home() {
   const router = useRouter();
-  const reducedMotion = useReducedMotion();
+  const { reduced: reducedMotion, toggle: toggleMotion } = useMotionToggle();
   const { theme, toggleTheme } = useDashboardTheme();
   // Deep links such as /dashboard?view=users open a view directly (used by the landing page).
   const requestedView = useSyncExternalStore(noSubscription, readRequestedView, () => null);
@@ -622,6 +625,12 @@ export default function Home() {
           run: toggleTheme,
         },
         {
+          id: "motion",
+          label: reducedMotion ? "Turn animations on" : "Turn animations off",
+          icon: reducedMotion ? ZapOff : Zap,
+          run: toggleMotion,
+        },
+        {
           id: "auto-refresh",
           label: autoRefresh ? "Pause auto-refresh" : "Resume auto-refresh",
           icon: RefreshCw,
@@ -664,6 +673,12 @@ export default function Home() {
               label: theme === "dark" ? "Light mode" : "Dark mode",
               icon: theme === "dark" ? Sun : Moon,
               onSelect: toggleTheme,
+            },
+            {
+              id: "motion",
+              label: reducedMotion ? "Turn animations on" : "Turn animations off",
+              icon: reducedMotion ? ZapOff : Zap,
+              onSelect: toggleMotion,
             },
             { id: "docs", label: "API reference", icon: BookOpen, href: `${API_BASE}/docs` },
           ]}
@@ -815,14 +830,12 @@ export default function Home() {
             </div>
           )}
 
-          <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={view}
               className="view"
-              initial={reducedMotion ? { opacity: 0 } : { opacity: 0, transform: "translateY(10px)", filter: "blur(4px)" }}
-              animate={reducedMotion ? { opacity: 1 } : { opacity: 1, transform: "translateY(0px)", filter: "blur(0px)" }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, transform: "translateY(-6px)", filter: "blur(2px)", transition: { duration: 0.12 } }}
-              transition={{ duration: 0.32, ease: [0.23, 1, 0.32, 1] }}
+              initial={reducedMotion ? { opacity: 0 } : { opacity: 0, transform: "translateY(6px)" }}
+              animate={{ opacity: 1, transform: "translateY(0px)" }}
+              transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
             >
               {view === "overview" && (
                 <>
@@ -838,22 +851,22 @@ export default function Home() {
                           : "Catalogue agents with calls in range"
                       }
                     >
-                      <NumberFlow value={agentActivity.active} locales="en-US" />
+                      <CountUp value={agentActivity.active} locales="en-US" />
                       <span className="unit kpi-of">/ {formatCount(agentCatalog.total)}</span>
                     </KpiCell>
                     <KpiCell label="Calls" color="var(--c-calls)" spark={sparks.calls} metric="calls" selected={metric} onSelect={setMetric} note={`${formatCount(activeUsers)} people · ${formatCount(liveUsers.length)} live now`}>
-                      <NumberFlow value={totals.requests} locales="en-US" />
+                      <CountUp value={totals.requests} locales="en-US" />
                     </KpiCell>
                     <KpiCell label="Tokens" color="var(--c-tokens)" spark={sparks.tokens} metric="tokens" selected={metric} onSelect={setMetric} note={`${formatCompact(totals.input)} in · ${formatCompact(totals.output)} out`}>
-                      <NumberFlow value={totals.input + totals.output} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
+                      <CountUp value={totals.input + totals.output} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
                     </KpiCell>
                     <KpiCell label="Models" color="var(--c-rose)" spark={sparks.models} note={modelLeader ? `Most calls: ${modelLeader.name}` : "No model calls in range"}>
-                      <NumberFlow value={modelShares.length} locales="en-US" />
+                      <CountUp value={modelShares.length} locales="en-US" />
                     </KpiCell>
                     <KpiCell label="Median latency" color="var(--c-sun)" spark={sparks.latency} note={latency.p95 ? `p95 ${formatSeconds(latency.p95)}` : "No latency recorded"}>
                       {latency.median ? (
                         <>
-                          <NumberFlow value={latency.median / 1000} locales="en-US" format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                          <CountUp value={latency.median / 1000} locales="en-US" format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
                           <span className="unit">s</span>
                         </>
                       ) : (
@@ -957,9 +970,8 @@ export default function Home() {
                 <ModelsView shares={modelShares} totals={totals} currency={currency} loading={loading} onPickModel={(name) => setSelectedModel(name)} />
               )}
 
-              {view === "activity" && <ActivityView events={filteredEvents} loading={loading} currency={currency} hues={hues} teams={teams} />}
+              {view === "activity" && <ActivityView events={filteredEvents} loading={loading} currency={currency} hues={hues} teams={teams} days={days} today={today ?? ""} onPickDay={openDay} />}
             </motion.div>
-          </AnimatePresence>
 
           <footer className="status-footer">
             <span className="freshness" data-state={error ? "error" : updatedAt ? "ok" : "pending"}>
@@ -1127,7 +1139,15 @@ function FindingCard({ finding, onAct }: { finding: Finding; onAct: () => void }
     <article className="finding">
       <p className="finding-label">{finding.label}</p>
       <p className="finding-figure num">
-        {finding.figure}
+        {/^[\d,]+(\.\d+)?$/.test(finding.figure) ? (
+          <CountUp
+            value={Number(finding.figure.replaceAll(",", ""))}
+            locales="en-US"
+            format={{ minimumFractionDigits: finding.figure.split(".")[1]?.length ?? 0, maximumFractionDigits: finding.figure.split(".")[1]?.length ?? 0 }}
+          />
+        ) : (
+          finding.figure
+        )}
         {finding.unit && <span className="unit">{finding.unit}</span>}
       </p>
       <p className="finding-text">{finding.text}</p>

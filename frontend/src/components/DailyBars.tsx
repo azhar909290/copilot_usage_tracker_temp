@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { displayDate, formatCompact, formatCount, formatMoney } from "@/lib/format";
 import type { Metric } from "@/lib/usage";

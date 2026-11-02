@@ -1,6 +1,6 @@
 "use client";
 
-import NumberFlow from "@number-flow/react";
+import { CountUp } from "@/components/CountUp";
 import { ArrowUpRight, Filter } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { formatAgo, formatCompact, formatCount, formatMoney } from "@/lib/format";
@@ -38,7 +38,7 @@ function TeamCard({
       </header>
       <div>
         <p className="team-figure num">
-          <NumberFlow value={team.tokens} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
+          <CountUp value={team.tokens} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
           <small>tokens</small>
         </p>
         <p className="team-share">
@@ -57,11 +57,15 @@ function TeamCard({
       <dl className="team-stats">
         <div>
           <dt>Calls</dt>
-          <dd>{formatCount(team.requests)}</dd>
+          <dd>
+            <CountUp value={team.requests} locales="en-US" />
+          </dd>
         </div>
         <div>
           <dt>Est. cost</dt>
-          <dd>{formatMoney(team.cost, currency)}</dd>
+          <dd>
+            <CountUp value={team.cost} locales="en-US" format={{ style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+          </dd>
         </div>
         <div>
           <dt>Active</dt>
@@ -243,19 +247,19 @@ export function TeamsView({
             <div>
               <dt>Calls</dt>
               <dd className="num">
-                <NumberFlow value={totals.requests} locales="en-US" />
+                <CountUp value={totals.requests} locales="en-US" />
               </dd>
             </div>
             <div>
               <dt>Tokens</dt>
               <dd className="num">
-                <NumberFlow value={totals.tokens} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
+                <CountUp value={totals.tokens} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 2 }} />
               </dd>
             </div>
             <div>
               <dt>Est. cost</dt>
               <dd className="num">
-                <NumberFlow value={totals.cost} locales="en-US" format={{ style: "currency", currency, maximumFractionDigits: 2, minimumFractionDigits: 2 }} />
+                <CountUp value={totals.cost} locales="en-US" format={{ style: "currency", currency, maximumFractionDigits: 2, minimumFractionDigits: 2 }} />
               </dd>
             </div>
           </dl>
@@ -278,7 +282,7 @@ export function TeamsView({
           </ol>
           {teams.demo && <p className="org-note">Team memberships are saved demo assignments, not HR records.</p>}
         </div>
-        <OrgConstellation organization={teams.organization} teams={summaries} currency={currency} selected={selectedTeam} onSelect={onSelectTeam} />
+        <OrgConstellation organization={teams.organization} teams={summaries} currency={currency} selected={selectedTeam} onSelect={onSelectTeam} onPickUser={onPickUser} />
       </Reveal>
 
       <Stagger className="team-grid" stagger={0.07}>

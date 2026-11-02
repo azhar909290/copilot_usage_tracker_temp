@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion";
 import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { displayDate, formatClock } from "@/lib/format";
 import { RIDGE_BIN_MINUTES, type Metric, type RidgeData } from "@/lib/usage";

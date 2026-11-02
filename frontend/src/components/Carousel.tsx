@@ -1,6 +1,8 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useReducedMotion } from "@/lib/motion";
+import { useAnimationActive } from "@/lib/animation";
 import {
   Children,
   useCallback,
@@ -36,6 +38,7 @@ export function Carousel({
   const slides = Children.toArray(children);
   const count = slides.length;
   const rootRef = useRef<HTMLElement>(null);
+  const active = useAnimationActive(rootRef);
   const trackRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressClick = useRef(false);
@@ -45,15 +48,14 @@ export function Carousel({
   const [playing, setPlaying] = useState(true);
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
-  const [pageHidden, setPageHidden] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const reducedMotion = useReducedMotion();
   const [drag, setDrag] = useState<number | null>(null);
 
   const inView = Math.max(1, Math.floor(perView + 0.01));
   const lastIndex = Math.max(0, count - inView);
   const current = Math.min(index, lastIndex);
   const autoplay =
-    playing && !hovered && !keyboardFocus && !pageHidden && !reducedMotion && drag === null && lastIndex > 0;
+    playing && active && !hovered && !keyboardFocus && !reducedMotion && drag === null && lastIndex > 0;
 
   useEffect(() => {
     const root = rootRef.current;
@@ -71,20 +73,6 @@ export function Carousel({
     const observer = new ResizeObserver(read);
     observer.observe(root);
     return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReducedMotion(query.matches);
-    const visibility = () => setPageHidden(document.visibilityState === "hidden");
-    update();
-    visibility();
-    query.addEventListener("change", update);
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      query.removeEventListener("change", update);
-      document.removeEventListener("visibilitychange", visibility);
-    };
   }, []);
 
   const goTo = useCallback(
@@ -114,6 +102,7 @@ export function Carousel({
     if (previous === current || reducedMotion) return;
     const direction = current > previous ? 1 : -1;
     trackRef.current?.querySelectorAll<HTMLElement>("[data-slide-body]").forEach((body, position) => {
+      if (position < current || position >= current + Math.ceil(perView)) return;
       body.animate(
         [
           { transform: `translateX(${direction * 3.5}vw)`, opacity: 0.4 },
@@ -127,7 +116,7 @@ export function Carousel({
         },
       );
     });
-  }, [current, reducedMotion]);
+  }, [current, reducedMotion, perView]);
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || lastIndex === 0) return;

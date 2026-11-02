@@ -63,11 +63,11 @@ Open `http://127.0.0.1:4318/docs` for the interactive API reference. API calls i
 
 ## Landing page
 
-`/` introduces the AI Control Plane: a three.js hero (three stacked control
-planes for cost, tokens and calls, an AI core, and the catalogue's agents
-orbiting it with data streaming in), live figures from the receiver for the last
-30 days (active agents out of the catalogue, calls, teams and people, models),
-the four lenses of the product and how telemetry flows into it. The scene follows
+`/` introduces the AI Control Plane: a three.js armillary sculpture (three
+graduated signal rings for cost, tokens and calls, a faceted core, and
+instanced agent nodes with data streaming in), the four lenses of the product and how
+telemetry flows into it. The landing page is static: it makes no API calls and
+shows no receiver data. The scene follows
 the pointer, pauses off screen, and falls back to a flat drawing without WebGL.
 
 ## Dashboard
@@ -89,13 +89,14 @@ The Organization, Catalog, Models and Activity views share the date, team, user,
 The Organization view shows `tth-cto-innovation` as one organization with five
 teams: Data, AI, Cognitive core, Rapid labs and Innovation.
 
-- **Constellation**: a three.js scene with the organization at the core, one
-  planet per team on a shared orbit (sized by the team's token share) and one
-  badge per member circling their team: their initial ringed in the team colour,
+- **Team atlas**: a three.js scene with a terraced organization hub, connected
+  hexagonal team platforms and a team pillar sized by token share. Member
+  badges sit in outward-facing terraces: their initial ringed in the team colour,
   sized by the member's tokens and dimmed when idle in the range. Drag to orbit; select a team (in the scene, the team
   list, a card or the donut) to fly the camera to it and focus the whole page.
-  Hovering the core, a team or a member shows its calls, tokens and cost. The
-  scene pauses when off screen; browsers without WebGL get a flat orbit diagram.
+  Hovering the core, a team or a member shows its calls, tokens and cost;
+  clicking a member badge filters the page to that person. The
+  scene pauses when off screen; browsers without WebGL get a flat atlas diagram.
 - **Team cards**: tokens, share of the organization, a contribution bar per
   member, calls, cost, active members and a daily sparkline.
 - **Team pulse**: daily calls stacked by team; hover a band to isolate it.
@@ -121,12 +122,25 @@ definition link, daily calls and the people who use the agent.
 ### Models and Activity
 
 Models shows the token mix as an animated donut, average tokens per call and a
-sortable table. Activity shows a weekday × hour heat field in local time (hot
-hours shift from aurora to ember), the busiest agents, a **signal network** and
-the recorded calls. The signal network is a four-layer graph of the top teams,
+sortable table. Activity opens with the **signal network**, followed by an
+**activity calendar** (one row per week, one cell per receiver day with its date
+and call count, shaded from aurora to ember; select a day to filter to it, with
+an hour-of-day strip underneath), the busiest agents and the recorded calls. The signal network is a four-layer graph of the top teams,
 people, agents and models: link width follows call counts, signals travel each
 link at a pace set by its traffic, and hovering or focusing a node traces its
 path through every layer.
+
+### Rendering performance
+
+Entrances use opacity and transforms, not full-panel blur. Ambient light uses
+soft radial gradients instead of large blurred layers. The landing scene
+batches its agent nodes into one instanced draw call; continuous 3D scenes cap
+pixel density at 1.5. Landing artwork and the signal network pause off screen
+and in hidden tabs, and 3D scenes resume when visible again. All network links
+remain visible, with up to 32 moving signals shared across all three network
+stages (the busiest links in each stage), so the middle stage stays animated. Counters
+start when first visible rather than animating below the fold on page load.
+View changes mount immediately without waiting for an exit animation.
 
 Press <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> for the command menu (views, agents, users, models and actions with fuzzy search), or <kbd>/</kbd> to focus the filter search.
 
@@ -178,13 +192,19 @@ The visual system, "Aurora Observatory", was set with the
 | Library | Used for |
 | --- | --- |
 | `next/font` | Self-hosted Bricolage Grotesque, Instrument Sans and JetBrains Mono |
-| `three` + `@react-three/fiber` | The landing hero, the Daily rhythm ridgeline and the Organization constellation (loaded on demand) |
+| `three` + `@react-three/fiber` | The landing hero, the Daily rhythm ridgeline and the Organization team atlas (loaded on demand) |
 | `motion` | Entrances, drawn charts, the catalogue grid, the detail panel and view changes |
 | `cmdk` | The ⌘K command menu |
 | `@number-flow/react` | KPI figures that roll to new values on refresh |
 
-The interface respects `prefers-reduced-motion`: travel, loops, orbits and the
-loader animation stop, while fades and colour changes that carry meaning remain.
+Animations are controlled by an in-app switch (the lightning icon in the rail or
+landing header, or "Turn animations off" in the command menu), stored in
+`localStorage` as `signal-motion`. They are on by default and deliberately do
+**not** follow the OS "reduce motion" setting, because that made the counters,
+charts, network signals and landing effects silently static. Turning them off
+stops travel, loops, orbits and the loader animation while fades and colour
+changes remain. Figures count up from zero whenever a screen appears
+(`components/CountUp.tsx`).
 The rail folds into a bottom bar below 720px.
 
 If `npm run dev` shows outdated styles after pulling changes, stop the dev server, delete `.next/dev` and start it again.

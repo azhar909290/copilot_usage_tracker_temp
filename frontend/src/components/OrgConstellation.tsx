@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useReducedMotion } from "motion/react";
-import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useReducedMotion } from "@/lib/motion";
+import { useAnimationActive } from "@/lib/animation";
+import { Component, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { formatCompact, formatCount, formatMoney } from "@/lib/format";
 import type { TeamSummary } from "@/lib/teams";
 import { useCssColors } from "./charts";
@@ -34,13 +35,11 @@ function supportsWebGL() {
 }
 const noSubscription = () => () => {};
 
-/** Flat orbit diagram of the same hierarchy for browsers without WebGL. */
-function OrbitFallback({ organization, teams, selected, onSelect }: { organization: string; teams: TeamSummary[]; selected: string | null; onSelect: (team: string | null) => void }) {
+function AtlasFallback({ organization, teams, selected, onSelect }: { organization: string; teams: TeamSummary[]; selected: string | null; onSelect: (team: string | null) => void }) {
   const maxTokens = Math.max(1, ...teams.map((team) => team.tokens));
   return (
     <svg viewBox="-200 -170 400 340" style={{ width: "100%", height: "100%" }} role="img" aria-label={`${organization} with ${teams.length} teams`}>
-      <circle r="120" fill="none" stroke="var(--control)" strokeDasharray="2 6" />
-      <circle r="26" fill="var(--c-tokens)" opacity="0.9" />
+      <path d="M0 -26 26 -13 26 13 0 26 -26 13 -26 -13Z" fill="var(--c-tokens)" opacity="0.9" />
       {teams.map((team, index) => {
         const angle = (index / teams.length) * Math.PI * 2 - Math.PI / 2;
         const x = Math.cos(angle) * 120;
@@ -49,10 +48,10 @@ function OrbitFallback({ organization, teams, selected, onSelect }: { organizati
         return (
           <g key={team.name} style={{ cursor: "pointer", opacity: selected && selected !== team.name ? 0.35 : 1 }} onClick={() => onSelect(selected === team.name ? null : team.name)}>
             <line x1="0" y1="0" x2={x} y2={y} stroke={`var(${team.token})`} strokeOpacity="0.4" />
-            <circle cx={x} cy={y} r={radius} fill={`var(${team.token})`} />
+            <path transform={`translate(${x} ${y})`} d="M0 -24 28 -12 28 12 0 24 -28 12 -28 -12Z" fill={`var(${team.token})`} fillOpacity="0.2" stroke={`var(${team.token})`} />
+            <circle cx={x} cy={y - 10} r={radius / 3} fill={`var(${team.token})`} />
             {team.members.map((member, position) => {
-              const a = (position / Math.max(1, team.members.length)) * Math.PI * 2;
-              return <circle key={member.user} cx={x + Math.cos(a) * (radius + 14)} cy={y + Math.sin(a) * (radius + 14)} r="3" fill={`var(${team.token})`} opacity={member.requests ? 1 : 0.35} />;
+              return <circle key={member.user} cx={x + ((position % 5) - 2) * 9} cy={y + 3 + Math.floor(position / 5) * 9} r="3" fill={`var(${team.token})`} opacity={member.requests ? 1 : 0.35} />;
             })}
             <text x={x} y={y + radius + 30} textAnchor="middle" fill="var(--text)" fontSize="12" fontWeight="600">
               {team.name}
@@ -70,12 +69,14 @@ export function OrgConstellation({
   currency,
   selected,
   onSelect,
+  onPickUser,
 }: {
   organization: string;
   teams: TeamSummary[];
   currency: string;
   selected: string | null;
   onSelect: (team: string | null) => void;
+  onPickUser: (user: string) => void;
 }) {
   const reducedMotion = Boolean(useReducedMotion());
   const frameRef = useRef<HTMLDivElement>(null);
@@ -84,24 +85,10 @@ export function OrgConstellation({
   const dragged = useRef(false);
   const [hover, setHover] = useState<ConstellationHover | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number; width: number } | null>(null);
-  const [visible, setVisible] = useState(true);
-  const [pageVisible, setPageVisible] = useState(true);
+  const active = useAnimationActive(frameRef);
   const webgl = useSyncExternalStore<boolean | null>(noSubscription, supportsWebGL, () => null);
   const tokens = useMemo(() => [...new Set(["--c-calls", "--c-tokens", "--c-cost", "--muted", "--surface", ...teams.map((team) => team.token)])], [teams]);
   const colors = useCssColors(tokens);
-
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame) return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { threshold: 0.05 });
-    observer.observe(frame);
-    const onVisibility = () => setPageVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
 
   const light = useMemo(() => {
     const surface = colors?.["--surface"];
@@ -126,13 +113,18 @@ export function OrgConstellation({
     if (dragged.current) return;
     onSelect(team);
   };
+  const pickMember = (team: string, user: string) => {
+    if (dragged.current) return;
+    if (selected !== team) onSelect(team);
+    onPickUser(user);
+  };
 
   const hoveredTeam = hover && hover.kind !== "org" ? teams.find((team) => team.name === hover.team) : undefined;
   const hoveredMember = hover?.kind === "member" ? hoveredTeam?.members.find((member) => member.user === hover.user) : undefined;
   const totals = teams.reduce((sum, team) => ({ requests: sum.requests + team.requests, tokens: sum.tokens + team.tokens, cost: sum.cost + team.cost }), { requests: 0, tokens: 0, cost: 0 });
   const memberCount = teams.reduce((sum, team) => sum + team.members.length, 0);
 
-  const fallback = <OrbitFallback organization={organization} teams={teams} selected={selected} onSelect={onSelect} />;
+  const fallback = <AtlasFallback organization={organization} teams={teams} selected={selected} onSelect={onSelect} />;
 
   return (
     <div
@@ -167,10 +159,11 @@ export function OrgConstellation({
             light={light}
             selected={selected}
             reducedMotion={reducedMotion}
-            running={visible && pageVisible}
+            running={active}
             labelLayer={labelRef}
             onHover={setHover}
             onSelect={select}
+            onPickMember={pickMember}
           />
         </SceneBoundary>
       ) : null}

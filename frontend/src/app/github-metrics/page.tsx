@@ -16,15 +16,19 @@ import {
   Sun,
   TriangleAlert,
   Users,
+  Zap,
+  ZapOff,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CountUp } from "@/components/CountUp";
 import { Rail } from "@/components/Rail";
 import { RidgeMark } from "@/components/RidgeMark";
 import { SignalLines } from "@/components/SignalLines";
 import { seriesColor } from "@/components/DataViews";
 import { personHues } from "@/lib/usage";
+import { useMotionToggle } from "@/lib/motion";
 import { useDashboardTheme } from "../theme";
 
 type Counts = {
@@ -170,6 +174,7 @@ function ModelUsageChart({ rows, metric }: { rows: Breakdown[]; metric: ModelMet
 
 export default function GitHubMetricsPage() {
   const { theme, toggleTheme } = useDashboardTheme();
+  const { reduced: motionOff, toggle: toggleMotion } = useMotionToggle();
   const [data, setData] = useState<Metrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -264,6 +269,7 @@ export default function GitHubMetricsPage() {
       ]}
       utilities={[
         { id: "theme", label: theme === "dark" ? "Light mode" : "Dark mode", icon: theme === "dark" ? Sun : Moon, onSelect: toggleTheme },
+        { id: "motion", label: motionOff ? "Turn animations on" : "Turn animations off", icon: motionOff ? ZapOff : Zap, onSelect: toggleMotion },
         { id: "docs", label: "Metrics documentation", icon: BookOpen, href: "https://docs.github.com/en/rest/copilot/copilot-usage-metrics" },
       ]}
     />
@@ -306,7 +312,7 @@ export default function GitHubMetricsPage() {
         <section className="kpis is-four" aria-label="GitHub usage totals">
           {kpis.map(({ label, value, note }) => <div className="kpi" key={label}>
             <span className="kpi-label">{label}</span>
-            <span className="kpi-value num">{value == null ? <span className="dash">Unavailable</span> : count(value)}</span>
+            <span className="kpi-value num">{value == null ? <span className="dash">Unavailable</span> : <CountUp value={value} locales="en-US" format={{ maximumFractionDigits: 2 }} />}</span>
             <span className="kpi-note">{note}</span>
           </div>)}
         </section>
