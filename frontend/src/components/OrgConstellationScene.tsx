@@ -167,95 +167,60 @@ function Constellation({
 
   /**
    * Proper 3D alignment for team members:
-   * - Arranged directly on / close to the team platform plate (radius 0.85 - 1.55).
-   * - Structured into single, double, or triple concentric stadium tiers based on member count.
-   * - Stepped height (0.12 - 0.28) ensures inner rows are never occluded by outer rows from camera pitch.
+   * - Arranged in an equidistant satellite arc around the team platform periphery (radius 2.15+).
+   * - Faces outward away from the galactic center so members never collide with team cylinders or core beams.
+   * - Multi-tier height staggering (0.28 vs 0.44) eliminates occlusion from any camera orbit angle.
    */
   const layout = useMemo(() => {
     return teams.map((team, index) => {
       const angle = (index / teams.length) * Math.PI * 2 - Math.PI / 2;
       const radius = 0.26 + 0.3 * Math.sqrt(team.tokens / maxTeamTokens);
       const N = team.members.length;
-      const plateRadius = N > 14 ? 1.85 : N > 8 ? 1.75 : 1.65;
-      const baseScale = N > 14 ? 0.75 : N > 8 ? 0.86 : 1.0;
 
       const members: MemberLayout[] = team.members.map((member, pos) => {
         let offsetX = 0;
         let offsetZ = 0;
-        let height = 0.18;
+        let height = 0.32;
 
         if (N === 1) {
-          const R = 1.15;
+          const R = 2.15;
           offsetX = Math.cos(angle) * R;
           offsetZ = Math.sin(angle) * R;
-          height = 0.18;
+          height = 0.34;
         } else if (N <= 6) {
-          // Single outer arc right on the plate (R = 1.25)
-          const R = 1.25;
-          const arcSpan = Math.min(Math.PI * 1.15, 0.36 * (N - 1) + 0.35);
+          // Single outer arc: R = 2.20
+          const R = 2.2;
+          const arcSpan = Math.min(Math.PI * 1.15, 0.44 * (N - 1) + 0.4);
           const t = pos / (N - 1) - 0.5; // -0.5 to +0.5
           const subAngle = angle + t * arcSpan;
           offsetX = Math.cos(subAngle) * R;
           offsetZ = Math.sin(subAngle) * R;
-          height = 0.16 + (pos % 2) * 0.08;
-        } else if (N <= 14) {
-          // Double concentric arc directly on the plate: Tier 1 (inner R=0.92) & Tier 2 (outer R=1.40)
-          const tier1Count = Math.floor(N * 0.45);
+          height = 0.3 + (pos % 2) * 0.16;
+        } else {
+          // Double outer arc for larger teams: Tier 1 (inner, R=2.12) & Tier 2 (outer, R=2.75)
+          const tier1Count = Math.min(5, Math.ceil(N / 2));
           if (pos < tier1Count) {
-            const R1 = 0.92;
-            const arcSpan1 = Math.PI * 0.92;
+            const R1 = 2.12;
+            const arcSpan1 = Math.PI * 0.95;
             const t = tier1Count > 1 ? pos / (tier1Count - 1) - 0.5 : 0;
             const subAngle = angle + t * arcSpan1;
             offsetX = Math.cos(subAngle) * R1;
             offsetZ = Math.sin(subAngle) * R1;
-            height = 0.24 + (pos % 2) * 0.08;
+            height = 0.28 + (pos % 2) * 0.12;
           } else {
             const tier2Count = N - tier1Count;
             const tier2Index = pos - tier1Count;
-            const R2 = 1.4;
-            const arcSpan2 = Math.PI * 1.22;
+            const R2 = 2.75;
+            const arcSpan2 = Math.PI * 1.25;
             const t = tier2Count > 1 ? tier2Index / (tier2Count - 1) - 0.5 : 0;
             const subAngle = angle + t * arcSpan2;
             offsetX = Math.cos(subAngle) * R2;
             offsetZ = Math.sin(subAngle) * R2;
-            height = 0.14 + (tier2Index % 2) * 0.08;
-          }
-        } else {
-          // 3 tiers for large teams in dev (15+ members): all comfortably seated on the plate
-          const tier1Count = Math.max(3, Math.floor(N * 0.25));
-          const tier2Count = Math.max(4, Math.floor(N * 0.35));
-          if (pos < tier1Count) {
-            const R1 = 0.85;
-            const arcSpan1 = Math.PI * 0.9;
-            const t = tier1Count > 1 ? pos / (tier1Count - 1) - 0.5 : 0;
-            const subAngle = angle + t * arcSpan1;
-            offsetX = Math.cos(subAngle) * R1;
-            offsetZ = Math.sin(subAngle) * R1;
-            height = 0.28 + (pos % 2) * 0.06;
-          } else if (pos < tier1Count + tier2Count) {
-            const tier2Index = pos - tier1Count;
-            const R2 = 1.2;
-            const arcSpan2 = Math.PI * 1.15;
-            const t = tier2Count > 1 ? tier2Index / (tier2Count - 1) - 0.5 : 0;
-            const subAngle = angle + t * arcSpan2;
-            offsetX = Math.cos(subAngle) * R2;
-            offsetZ = Math.sin(subAngle) * R2;
-            height = 0.2 + (tier2Index % 2) * 0.06;
-          } else {
-            const tier3Count = N - tier1Count - tier2Count;
-            const tier3Index = pos - tier1Count - tier2Count;
-            const R3 = 1.55;
-            const arcSpan3 = Math.PI * 1.35;
-            const t = tier3Count > 1 ? tier3Index / (tier3Count - 1) - 0.5 : 0;
-            const subAngle = angle + t * arcSpan3;
-            offsetX = Math.cos(subAngle) * R3;
-            offsetZ = Math.sin(subAngle) * R3;
-            height = 0.12 + (tier3Index % 2) * 0.06;
+            height = 0.44 + (tier2Index % 2) * 0.15;
           }
         }
 
-        const rawSize = member.tokens > 0 ? 0.28 + 0.18 * Math.sqrt(member.tokens / maxMemberTokens) : 0.24;
-        const size = rawSize * baseScale;
+        const size = member.tokens > 0 ? 0.32 + 0.25 * Math.sqrt(member.tokens / maxMemberTokens) : 0.28;
 
         return {
           offsetX,
@@ -266,7 +231,7 @@ function Constellation({
         };
       });
 
-      return { angle, radius, plateRadius, members };
+      return { angle, radius, members };
     });
   }, [teams, maxTeamTokens, maxMemberTokens]);
 
@@ -545,11 +510,11 @@ function Constellation({
             }}
           >
             <mesh position={[0, -0.2, 0]}>
-              <cylinderGeometry args={[layout[index]?.plateRadius ?? 1.65, layout[index]?.plateRadius ?? 1.65, 0.12, 6]} />
+              <cylinderGeometry args={[1.7, 1.7, 0.12, 6]} />
               <meshBasicMaterial color={team.color} transparent opacity={light ? 0.22 : 0.13} userData={{ base: light ? 0.22 : 0.13 }} />
             </mesh>
             <mesh position={[0, -0.2, 0]} raycast={noHit}>
-              <cylinderGeometry args={[(layout[index]?.plateRadius ?? 1.65) * 1.006, (layout[index]?.plateRadius ?? 1.65) * 1.006, 0.13, 6]} />
+              <cylinderGeometry args={[1.71, 1.71, 0.13, 6]} />
               <meshBasicMaterial color={team.color} wireframe transparent opacity={0.4} userData={{ base: 0.4 }} />
             </mesh>
             <mesh position={[0, 0.12, 0]}>
