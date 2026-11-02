@@ -5,6 +5,7 @@ import { displayCallTime, displayDate, formatCompact, formatCount, formatMoney, 
 import type { TeamData } from "@/lib/teams";
 import type { CallEvent, Share, Totals } from "@/lib/usage";
 import { Donut } from "./charts";
+import { ModelPodium } from "./ModelPodium";
 import { NeuralFlow } from "./NeuralFlow";
 import { Person } from "./Person";
 import { Reveal } from "./Reveal";
@@ -45,6 +46,16 @@ export function ModelsView({
 
   return (
     <>
+      <Reveal as="div">
+        <ModelPodium
+          shares={shares}
+          currency={currency}
+          totalTokens={totalTokens}
+          totalCalls={totals.requests}
+          totalCost={totals.cost}
+          onPickModel={onPickModel}
+        />
+      </Reveal>
       <Reveal as="section" className="block">
         <header className="block-head">
           <div className="block-title">

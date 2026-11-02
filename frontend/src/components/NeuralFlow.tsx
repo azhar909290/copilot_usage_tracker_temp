@@ -44,7 +44,10 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
   const frameRef = useRef<HTMLDivElement>(null);
   const active = useAnimationActive(frameRef);
   const [width, setWidth] = useState(0);
-  const [focus, setFocus] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const activeFocus = hovered ?? selected;
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -107,7 +110,9 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
       const b = byId.get(to);
       if (!a || !b) continue;
       const bend = (b.x - a.x) * 0.48;
-      edges.push({ id: key, from, to, weight, color: b.color, d: `M${a.x},${a.y}C${a.x + bend},${a.y} ${b.x - bend},${b.y} ${b.x},${b.y}` });
+      // When origin is a team, carry that team's distinct identity color rather than forcing green
+      const edgeColor = a.layer === "team" ? a.color : b.color;
+      edges.push({ id: key, from, to, weight, color: edgeColor, d: `M${a.x},${a.y}C${a.x + bend},${a.y} ${b.x - bend},${b.y} ${b.x},${b.y}` });
     }
     return { nodes, edges, columns };
   }, [width, graph, teams]);
@@ -118,13 +123,14 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
     if (active && !reduced) svg?.unpauseAnimations();
     else svg?.pauseAnimations();
   }, [active, reduced, layout]);
+
   const linked = useMemo(() => {
-    if (!focus) return null;
+    if (!activeFocus) return null;
     // Follow the focused node's links both upstream and downstream through the layers.
-    const keep = new Set([focus]);
+    const keep = new Set([activeFocus]);
     const order = LAYERS.map((layer) => layer.key);
     const layerOf = (id: string) => order.indexOf(id.split(":")[0] as Layer);
-    const start = layerOf(focus);
+    const start = layerOf(activeFocus);
     for (let step = 0; step < order.length; step += 1) {
       for (const edge of layout.edges) {
         if (keep.has(edge.from) && layerOf(edge.to) > start) keep.add(edge.to);
@@ -132,32 +138,56 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
       }
     }
     return keep;
-  }, [focus, layout.edges]);
+  }, [activeFocus, layout.edges]);
+
+  // Clean, controlled pulses with dignified pacing and sequential stage cascades
   const pulses = useMemo(() => {
-    const stages = LAYERS.slice(0, -1).map((layer) =>
-      layout.edges
-        .filter((edge) => edge.from.startsWith(`${layer.key}:`) && (!linked || (linked.has(edge.from) && linked.has(edge.to))))
-        .sort((a, b) => b.weight - a.weight),
-    );
-    // Every stage carries the same number of dots; a stage with fewer links doubles up on its busiest ones.
-    const perStage = Math.min(PULSES_PER_STAGE, Math.max(0, ...stages.map((stage) => stage.length)));
-    const map = new Map<string, { count: number; stageMax: number }>();
-    for (const stage of stages) {
-      if (!stage.length) continue;
-      const stageMax = stage[0].weight || 1;
-      for (let slot = 0; slot < perStage; slot += 1) {
-        const edge = stage[slot % stage.length];
-        const entry = map.get(edge.id) ?? { count: 0, stageMax };
-        entry.count += 1;
-        map.set(edge.id, entry);
+    const map = new Map<string, { count: number; duration: number; beginOffsets: number[] }>();
+    if (!layout.edges.length) return map;
+
+    for (let index = 0; index < layout.edges.length; index++) {
+      const edge = layout.edges[index];
+      const isConnected = !linked || (linked.has(edge.from) && linked.has(edge.to));
+      if (!isConnected) continue;
+
+      const stageIndex = edge.from.startsWith("team:") ? 0 : edge.from.startsWith("person:") ? 1 : 2;
+      const weightRatio = edge.weight / maxEdge;
+
+      // 1 or 2 dots per link maximum to prevent crowded barrages
+      const count = weightRatio > 0.65 ? 2 : 1;
+
+      // Smooth duration between 3.4s and 4.2s (never a hyperactive burst)
+      const duration = 4.2 - 0.8 * Math.sqrt(weightRatio);
+
+      // Cascading stage delay across layers: team -> people -> agents -> models
+      const stageDelay = stageIndex * 1.05;
+      const basePhase = (index * 0.43) % 2.5;
+
+      const beginOffsets: number[] = [];
+      for (let c = 0; c < count; c++) {
+        beginOffsets.push(-(stageDelay + basePhase + (c * duration) / count));
       }
+
+      map.set(edge.id, { count, duration, beginOffsets });
     }
+
     return map;
-  }, [layout.edges, linked]);
-  const focused = layout.nodes.find((node) => node.id === focus);
+  }, [layout.edges, linked, maxEdge]);
+
+  const focusedNode = layout.nodes.find((node) => node.id === activeFocus);
 
   return (
-    <div className="neural" ref={frameRef} data-active={active} onPointerLeave={() => setFocus(null)}>
+    <div
+      className="neural"
+      ref={frameRef}
+      data-active={active}
+      onPointerLeave={() => setHovered(null)}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).tagName === "svg") {
+          setSelected(null);
+        }
+      }}
+    >
       {width > 0 && layout.nodes.length > 0 ? (
         <svg width={width} height={HEIGHT} role="img" aria-label={`Signal network of ${formatCount(events.length)} calls: top teams, people, agents and models, linked by call volume.`}>
           {LAYERS.map((layer, index) => (
@@ -169,6 +199,8 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
             {layout.edges.map((edge, index) => {
               const dim = linked && !(linked.has(edge.from) && linked.has(edge.to));
               const strength = edge.weight / maxEdge;
+              const pulseData = pulses.get(edge.id);
+
               return (
                 <g key={edge.id} className={dim ? "is-dim" : undefined}>
                   <path
@@ -180,18 +212,30 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
                     strokeWidth={0.6 + 3.2 * Math.sqrt(strength)}
                     style={{ "--i": index % 24 } as CSSProperties}
                   />
-                  {!reduced && !dim && pulses.has(edge.id) && (() => {
-                    const { count, stageMax } = pulses.get(edge.id)!;
-                    const local = Math.sqrt(edge.weight / stageMax);
-                    const duration = 3.4 - 1.6 * local;
-                    return Array.from({ length: count }, (_, copy) => (
-                      <circle key={copy} className="neural-pulse" r={2 + 1.6 * local} fill={edge.color} style={{ color: edge.color }}>
-                        <animateMotion dur={`${duration.toFixed(2)}s`} begin={`${(-(((index * 0.37) % 3) + (copy * duration) / count)).toFixed(2)}s`} repeatCount="indefinite">
-                          <mpath href={`#neural-${uid}-${index}`} />
-                        </animateMotion>
-                      </circle>
-                    ));
-                  })()}
+                  {!reduced && !dim && pulseData && (
+                    <>
+                      {pulseData.beginOffsets.map((begin, copy) => {
+                        const pulseRadius = 2.4 + 1.2 * Math.sqrt(strength);
+                        return (
+                          <circle
+                            key={copy}
+                            className="neural-pulse"
+                            r={pulseRadius}
+                            fill={edge.color}
+                            style={{ color: edge.color }}
+                          >
+                            <animateMotion
+                              dur={`${pulseData.duration.toFixed(2)}s`}
+                              begin={`${begin.toFixed(2)}s`}
+                              repeatCount="indefinite"
+                            >
+                              <mpath href={`#neural-${uid}-${index}`} />
+                            </animateMotion>
+                          </circle>
+                        );
+                      })}
+                    </>
+                  )}
                 </g>
               );
             })}
@@ -200,20 +244,36 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
             {layout.nodes.map((node, index) => {
               const column = LAYERS.findIndex((layer) => layer.key === node.layer);
               const dim = linked && !linked.has(node.id);
+              const isSelected = selected === node.id;
+              const isHover = hovered === node.id;
+              const isFocus = isSelected || isHover;
               const anchor = column === 0 ? "end" : "start";
               const labelX = column === 0 ? node.x - node.r - 8 : node.x + node.r + 8;
               const max = column === 0 ? 14 : column === LAYERS.length - 1 ? 22 : 20;
+
               return (
                 <g
                   key={node.id}
-                  className={`neural-node${dim ? " is-dim" : ""}${focus === node.id ? " is-focus" : ""}`}
+                  className={`neural-node${dim ? " is-dim" : ""}${isFocus ? " is-focus" : ""}${isSelected ? " is-selected" : ""}`}
                   style={{ "--c": node.color, "--col": column, "--i": index } as CSSProperties}
-                  onPointerEnter={() => setFocus(node.id)}
-                  onFocus={() => setFocus(node.id)}
-                  onBlur={() => setFocus(null)}
+                  onPointerEnter={() => setHovered(node.id)}
+                  onPointerLeave={() => setHovered(null)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelected((prev) => (prev === node.id ? null : node.id));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelected((prev) => (prev === node.id ? null : node.id));
+                    }
+                  }}
+                  onFocus={() => setHovered(node.id)}
+                  onBlur={() => setHovered(null)}
                   tabIndex={0}
                   role="button"
-                  aria-label={`${node.label}: ${formatCount(node.weight)} calls`}
+                  aria-pressed={isSelected}
+                  aria-label={`${node.label}: ${formatCount(node.weight)} calls (${node.layer}). Click or press Enter to pin.`}
                 >
                   <circle className="neural-halo" cx={node.x} cy={node.y} r={node.r + 6} />
                   <circle className="neural-glow" cx={node.x} cy={node.y} r={node.r + 3} />
@@ -229,15 +289,16 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
       ) : (
         <p className="empty">{events.length ? "Preparing the network…" : "No calls in this range."}</p>
       )}
-      <p className="neural-readout" aria-live="polite">
-        {focused ? (
+      <div className="neural-readout" aria-live="polite">
+        {focusedNode ? (
           <>
-            <strong>{focused.label}</strong> · {formatCount(focused.weight)} calls · {focused.layer}
+            <strong>{focusedNode.label}</strong> · {formatCount(focusedNode.weight)} calls · {focusedNode.layer}
+            {selected === focusedNode.id && <span className="neural-pin-tag"> (Pinned · click to release)</span>}
           </>
         ) : (
-          "Hover or focus a node to trace its signal path"
+          "Click or hover a team or node to trace its signal path"
         )}
-      </p>
+      </div>
     </div>
   );
 }

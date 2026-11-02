@@ -80,7 +80,7 @@ import {
 import { normalizeTeams, teamOf, teamToken, type TeamData } from "@/lib/teams";
 import { useDashboardTheme } from "../theme";
 
-type View = "overview" | "users" | "agents" | "models" | "activity";
+type View = "overview" | "users" | "activity" | "agents" | "models";
 const API_BASE = (process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318").replace(/\/$/, "");
 const API_HOST = API_BASE.replace(/^https?:\/\//, "");
 const BOOT_MINIMUM_MS = 700;
@@ -88,9 +88,9 @@ const BOOT_MINIMUM_MS = 700;
 const VIEWS: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
   { id: "users", label: "Organization", icon: Network },
+  { id: "activity", label: "Activity", icon: Activity },
   { id: "agents", label: "Catalog", icon: Boxes },
   { id: "models", label: "Models", icon: Cpu },
-  { id: "activity", label: "Activity", icon: Activity },
 ];
 
 const PERIODS: Period[] = [7, 30, 90];
