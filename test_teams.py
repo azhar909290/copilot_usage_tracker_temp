@@ -18,6 +18,7 @@ class DemoTeamTests(unittest.TestCase):
             users = [f"user-{i}" for i in range(23)]
             result = teams.for_users(users)
             self.assertTrue(result["demo"])
+            self.assertEqual(result["organization"], "tth-cto-innovation")
             self.assertEqual(result["names"], list(TEAM_NAMES))
             self.assertEqual(set(result["assignments"]), set(users))
             counts = Counter(result["assignments"].values())

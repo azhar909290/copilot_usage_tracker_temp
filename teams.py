@@ -8,6 +8,7 @@ from pathlib import Path
 from user_mapping import normalize_user
 
 TEAM_NAMES = ("Data", "AI", "Cognitive core", "Rapid labs", "Innovation")
+TEAM_ORGANIZATION = os.getenv("TEAM_ORGANIZATION", "").strip() or "tth-cto-innovation"
 
 
 class DemoTeams:
@@ -47,6 +48,7 @@ class DemoTeams:
                 self._save(assignments)
             return {
                 "demo": True,
+                "organization": TEAM_ORGANIZATION,
                 "names": list(TEAM_NAMES),
                 "assignments": {user: assignments[user] for user in canonical_users},
             }
