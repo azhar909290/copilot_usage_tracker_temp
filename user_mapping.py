@@ -27,6 +27,7 @@ IGNORED_USERS = {
     "shared",
     "local-os-user",
     "unknown",
+    "azureuser"
 }
 
 # Canonical team GitHub accounts
@@ -99,6 +100,7 @@ DEFAULT_USER_MAPPINGS = {
     "samuel.green": "Ganeshkumar-Balu",
     "sarah.chen": "Sanjay-Kumar-S-3",
     "GnaneeshwarAariDamod": "gnaneeshwar-a-d",
+    "VIKASS": "Vikas1610-S",
 }
 
 

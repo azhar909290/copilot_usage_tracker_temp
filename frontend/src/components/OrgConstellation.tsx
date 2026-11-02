@@ -35,7 +35,17 @@ function supportsWebGL() {
 }
 const noSubscription = () => () => {};
 
-function AtlasFallback({ organization, teams, selected, onSelect }: { organization: string; teams: TeamSummary[]; selected: string | null; onSelect: (team: string | null) => void }) {
+function AtlasFallback({
+  organization,
+  teams,
+  selected,
+  onSelect,
+}: {
+  organization: string;
+  teams: TeamSummary[];
+  selected: string | null;
+  onSelect: (team: string | null) => void;
+}) {
   const maxTokens = Math.max(1, ...teams.map((team) => team.tokens));
   return (
     <svg viewBox="-200 -170 400 340" style={{ width: "100%", height: "100%" }} role="img" aria-label={`${organization} with ${teams.length} teams`}>
@@ -113,6 +123,7 @@ export function OrgConstellation({
     if (dragged.current) return;
     onSelect(team);
   };
+
   const pickMember = (team: string, user: string) => {
     if (dragged.current) return;
     if (selected !== team) onSelect(team);
@@ -121,10 +132,20 @@ export function OrgConstellation({
 
   const hoveredTeam = hover && hover.kind !== "org" ? teams.find((team) => team.name === hover.team) : undefined;
   const hoveredMember = hover?.kind === "member" ? hoveredTeam?.members.find((member) => member.user === hover.user) : undefined;
+  const selectedTeamData = teams.find((team) => team.name === selected);
   const totals = teams.reduce((sum, team) => ({ requests: sum.requests + team.requests, tokens: sum.tokens + team.tokens, cost: sum.cost + team.cost }), { requests: 0, tokens: 0, cost: 0 });
   const memberCount = teams.reduce((sum, team) => sum + team.members.length, 0);
 
   const fallback = <AtlasFallback organization={organization} teams={teams} selected={selected} onSelect={onSelect} />;
+
+  // Accessible live announcement text
+  const liveAnnouncement = hoveredMember
+    ? `Member ${hoveredMember.user} of ${hoveredTeam?.name} team: ${formatCompact(hoveredMember.tokens)} tokens, ${formatCount(hoveredMember.requests)} calls.`
+    : hoveredTeam
+      ? `Team ${hoveredTeam.name}: ${hoveredTeam.members.length} members, ${formatCompact(hoveredTeam.tokens)} tokens.`
+      : selected
+        ? `Focused on ${selected} team with ${selectedTeamData?.members.length ?? 0} members.`
+        : `Organization view of ${organization}: ${teams.length} teams, ${memberCount} members.`;
 
   return (
     <div
@@ -148,6 +169,69 @@ export function OrgConstellation({
         setHover(null);
       }}
     >
+      {/* Accessible Screen Reader Announcement */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
+
+      {/* Accessible Navigation Controls for keyboard / screen reader users */}
+      <div className="constellation-toolbar" role="toolbar" aria-label="Constellation team controls">
+        <div className="constellation-team-pills" role="radiogroup" aria-label="Select team to inspect">
+          <button
+            type="button"
+            className={`constellation-pill ${!selected ? "is-active" : ""}`}
+            role="radio"
+            aria-checked={!selected}
+            onClick={() => select(null)}
+          >
+            All teams
+          </button>
+          {teams.map((team) => {
+            const isTeamSelected = selected === team.name;
+            return (
+              <button
+                key={team.name}
+                type="button"
+                className={`constellation-pill ${isTeamSelected ? "is-active" : ""}`}
+                role="radio"
+                aria-checked={isTeamSelected}
+                style={{ "--team": `var(${team.token})` } as CSSProperties}
+                onClick={() => select(isTeamSelected ? null : team.name)}
+                onFocus={() => setHover({ kind: "team", team: team.name })}
+                onBlur={() => setHover(null)}
+              >
+                <i className="pill-dot" aria-hidden="true" />
+                <span>{team.name}</span>
+                <span className="pill-badge">{team.members.length}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* When a team is selected, display accessible member pills for keyboard navigation */}
+        {selectedTeamData && (
+          <div className="constellation-members-bar" role="group" aria-label={`${selectedTeamData.name} team members`}>
+            <span className="members-bar-label">Members:</span>
+            <div className="members-bar-list">
+              {selectedTeamData.members.map((member) => (
+                <button
+                  key={member.user}
+                  type="button"
+                  className="member-pill"
+                  onClick={() => pickMember(selectedTeamData.name, member.user)}
+                  onFocus={() => setHover({ kind: "member", team: selectedTeamData.name, user: member.user })}
+                  onBlur={() => setHover(null)}
+                  aria-label={`${member.user}: ${formatCompact(member.tokens)} tokens, ${formatCount(member.requests)} calls. Click to filter.`}
+                >
+                  <span className="member-pill-name">{member.user}</span>
+                  <span className="member-pill-tokens">{formatCompact(member.tokens)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {webgl === false ? (
         fallback
       ) : webgl && colors ? (
@@ -167,25 +251,42 @@ export function OrgConstellation({
           />
         </SceneBoundary>
       ) : null}
+
+      {/* Floating 3D projection labels with click capability */}
       {webgl !== false && (
         <div className="constellation-labels" ref={labelRef} aria-hidden="true">
-          <span className="is-org">{organization}</span>
+          <button
+            type="button"
+            className="is-org constellation-label-btn"
+            onClick={() => select(null)}
+            tabIndex={-1}
+          >
+            {organization}
+          </button>
           {teams.map((team, index) => (
-            <span
+            <button
               key={team.name}
               data-team={index}
-              className={selected && selected !== team.name ? "is-dim" : undefined}
+              type="button"
+              className={`constellation-label-btn ${selected && selected !== team.name ? "is-dim" : ""} ${selected === team.name ? "is-active" : ""}`}
               style={{ "--team": `var(${team.token})` } as CSSProperties}
+              onClick={() => select(selected === team.name ? null : team.name)}
+              tabIndex={-1}
             >
               {team.name} <span className="num">{team.members.length}</span>
-            </span>
+            </button>
           ))}
         </div>
       )}
+
       {hover && pointer && (
         <div
           className="constellation-tip"
-          style={{ left: Math.min(pointer.x, pointer.width - 220), top: pointer.y, "--team": hoveredTeam ? `var(${hoveredTeam.token})` : undefined } as CSSProperties}
+          style={{
+            left: Math.min(pointer.x, pointer.width - 220),
+            top: pointer.y,
+            "--team": hoveredTeam ? `var(${hoveredTeam.token})` : undefined,
+          } as CSSProperties}
         >
           {hover.kind === "org" ? (
             <>
@@ -229,7 +330,12 @@ export function OrgConstellation({
           ) : null}
         </div>
       )}
-      <p className="constellation-hint">{webgl === false ? "Select a team" : "Drag to orbit · select a team to focus"}</p>
+
+      <p className="constellation-hint">
+        {webgl === false
+          ? "Select a team above"
+          : "Drag or Arrow keys to orbit · + / - to zoom · Select team or member to inspect"}
+      </p>
     </div>
   );
 }
