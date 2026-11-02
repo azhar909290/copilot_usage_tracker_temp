@@ -35,6 +35,15 @@ class DemoTeamTests(unittest.TestCase):
             result = teams.for_users(["2860041", "EswaraGollangi", "eswarasai-25", "unknown", ""])
             self.assertEqual(list(result["assignments"]), ["eswarasai-25"])
 
+    def test_ignored_users_in_saved_assignments_are_cleaned_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "team_assignments.json"
+            path.write_text(json.dumps({"azureuser": "AI", "azhar909290": "Innovation", "unknown": "Data"}))
+            teams = DemoTeams(path)
+            self.assertEqual(teams._assignments, {"azhar909290": "Innovation"})
+            saved = json.loads(path.read_text())
+            self.assertEqual(saved, {"azhar909290": "Innovation"})
+
     def test_invalid_saved_assignments_and_write_errors_are_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "team_assignments.json"

@@ -20,12 +20,19 @@ class DemoTeams:
         if path.exists():
             assignments = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(assignments, dict) or any(
-                not isinstance(user, str) or not normalize_user(user)
+                not isinstance(user, str)
                 or not isinstance(team, str) or team not in TEAM_NAMES
                 for user, team in assignments.items()
             ):
                 raise ValueError(f"Invalid demo team assignments in {path}")
-            self._assignments = assignments
+            cleaned: dict[str, str] = {}
+            for user, team in assignments.items():
+                canonical = normalize_user(user)
+                if canonical:
+                    cleaned[canonical] = team
+            self._assignments = cleaned
+            if cleaned != assignments:
+                self._save(cleaned)
 
     def _save(self, assignments: dict[str, str]) -> None:
         temp = self.path.with_suffix(".tmp")
