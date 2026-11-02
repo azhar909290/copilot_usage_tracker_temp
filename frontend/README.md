@@ -103,7 +103,7 @@ teams: Data, AI, Cognitive core, Rapid labs and Innovation.
 - **Token share donut** and a **leaderboard** of the members with the most tokens.
 - **Members table**: every member with their team, live badge and usage.
 
-Team memberships come from the receiver (`DATA_DIR/team_assignments.json`). They
+Team memberships come from the receiver (`team_assignments.py`). They
 are saved demo assignments, not HR records: new users are assigned to the
 smallest team at random and keep that team afterwards. Usage from people
 without a membership (for example `unknown`) appears as Unassigned. Set
