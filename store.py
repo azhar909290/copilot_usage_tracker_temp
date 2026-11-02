@@ -29,7 +29,7 @@ class UsageStore:
         self._seen: set[str] = set()
         self._daily: dict[tuple, dict] = {}
         self._events: list[dict] = []
-        self._teams = DemoTeams(self.dir / "team_assignments.json")
+        self._teams = DemoTeams()
         self._replay()
 
     def _accumulate(self, e: dict) -> None:
