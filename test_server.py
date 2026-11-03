@@ -63,7 +63,7 @@ class AgentTelemetryTests(unittest.TestCase):
                     self.assertIsNotNone(row["first_seen"])
                     self.assertEqual(row["first_seen"], row["last_seen"])
                     self.assertGreaterEqual(row["latency_ms_avg"], 0)
-                    self.assertAlmostEqual(row["cost"], 0.000119)
+                    self.assertAlmostEqual(row["cost"], 0.00000012)
                 events = server.usage()["events"]
                 self.assertEqual(len(events), 2)
                 self.assertEqual(events[0]["agent"], "Planner")

@@ -160,9 +160,9 @@ class ParserTests(unittest.TestCase):
             with self.subTest(model=model):
                 key, cost = prices.cost([model], 600_000, 400_000)
                 self.assertEqual(key, "flat-rate")
-                self.assertAlmostEqual(cost, 0.99)
+                self.assertAlmostEqual(cost, 0.001)
         self.assertEqual(prices.cost([], 0, 0), ("flat-rate", 0.0))
-        self.assertAlmostEqual(prices.cost([], 1000, 0)[1], 0.00099)
+        self.assertAlmostEqual(prices.cost([], 1000, 0)[1], 0.000001)
 
     def test_inherits_authenticated_account_from_invoke_agent_parent(self):
         trace_id = "trace"

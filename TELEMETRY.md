@@ -218,7 +218,7 @@ The latency average includes only spans with valid start and end timestamps;
 it is LLM-call latency, not total agent execution time. Old ledger entries still
 work and do not contribute unknown latency as zero.
 
-Cost is the project's existing flat USD estimate: $0.99 per million combined
+Cost is the project's flat USD estimate: $1.00 per billion ($0.001 per million) combined
 input and output tokens. It is not a provider invoice or Copilot premium-request
 charge and does not distinguish cached-token pricing. The current pricing code
 does not read `prices.yaml`.

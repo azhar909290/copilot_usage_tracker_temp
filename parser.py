@@ -326,7 +326,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 "output_tokens": out_tok,
                 "total_tokens": in_tok + out_tok,
                 "latency_ms": latency_ms,
-                "cost": round(cost, 8) if cost is not None else 0.0,
+                "cost": round(cost, 10) if cost is not None else 0.0,
                 "priced": cost is not None,
             }
             if u == "unknown":
