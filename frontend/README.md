@@ -76,13 +76,32 @@ The dashboard lives at `/dashboard`; `/dashboard?view=users` (or `agents`,
 `models`, `activity`) opens a view directly. The overview answers "where is the team's Copilot usage going, and what does it cost?" for the selected range (7, 30 or 90 days):
 
 - **Title row**: the organization (`tth-cto-innovation`), the scope (all teams, one team or one user), the range, a freshness stamp, and the strongest finding in one sentence (for example, which model drove most of the estimated cost).
-- **KPI cards**: active agents (catalogue agents with calls, out of the catalogue total, plus any active agents outside it), calls (with people and live users), tokens (in/out), models used, and median/p95 latency, each with a drawn-in daily sparkline in its own hue. Calls and Tokens double as the metric switch for the two charts below. The headline sentence above the filters is the strongest usage finding, not a cost one.
+- **KPI cards**: active agents (catalogue agents with calls, out of the catalogue total, plus any active agents outside it), calls (with people and live users), tokens (in/out), models used, estimated hours saved, and estimated value delivered. Each has a daily sparkline; the impact sparklines follow calls because both estimates use a fixed per-call assumption. Calls and Tokens double as the metric switch for the two charts below. The headline sentence above the filters is the strongest usage finding, not a cost one.
 - **Daily rhythm**: a three.js ridgeline, with one line per receiver day and the newest day (bright ink) in front. Ridges shade by depth from a back hue to the selected metric's hue. Each line is the smoothed density of the selected metric by UTC time of day (18-minute Gaussian kernel), so the area under a line equals that day's total. Hovering reads the exact 30-minute bin under the pointer; clicking opens that day in Activity. Browsers without WebGL get a flat SVG version of the same data.
 - **Per-day bars**: the same metric per day on a labelled scale, linked to the ridge (hovering either highlights the same day in both). Bars grow in with a stagger in the metric's gradient and today's bar glows; arrow keys and Enter work when the chart has focus.
 - **Findings carousel**: plain-language facts computed from the filtered data (biggest cost driver, unpriced calls, peak half-hour, busiest agent, heaviest user, busiest day, slowest model, input/output ratio), each with an action that applies a filter or opens a view. Slide width and travel are computed in CSS viewport units; it autoplays every 7 seconds, pauses on hover, keyboard focus or the Pause button, supports drag/swipe and arrow keys, and never autoplays under reduced motion.
 - **Models and Agents** share lists (top five, row fill as the bar) and **Recent calls**.
 
 The Organization, Catalog, Models and Activity views share the date, team, user, agent, model and text filters. Selecting a team scopes every view to that team's members; on Organization it focuses the team instead, so the whole hierarchy stays visible. The dashboard also supports auto-refresh and CSV export; usage and activity exports include each person's team.
+
+### Estimated impact
+
+The overview's impact figures are illustrative estimates for the selected range
+and filters, not measured productivity or revenue. The default assumptions are
+6 minutes saved per recorded LLM call and $25 per hour, defined in
+`src/lib/impact.ts`. Hours saved = calls × 6 / 60; value delivered = hours × $25.
+An agent task can make several calls, including background and subagent calls,
+and the tracker does not record task completion or actual time saved.
+
+The value card also shows estimated **net ROI** as a multiple:
+`(estimated value - estimated model spend) / estimated model spend`. It includes
+only model spend, excluding subscriptions and all other costs. Model spend uses
+the receiver's flat token-price estimate, not a provider invoice or Copilot
+subscription charge. ROI is unavailable for zero spend, unpriced calls, a missing
+or non-USD spend currency, or invalid spend data. Latency remains available in
+Activity, Recent calls and the findings.
+
+Run the impact calculation tests with `npm run test:impact` from `frontend/`.
 
 ### Organization
 

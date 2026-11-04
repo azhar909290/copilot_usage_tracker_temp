@@ -13,6 +13,7 @@ import {
   Cpu,
   Download,
   GitBranch,
+  Info,
   LayoutGrid,
   Moon,
   Network,
@@ -55,6 +56,12 @@ import {
   formatSeconds,
 } from "@/lib/format";
 import {
+  ESTIMATED_MINUTES_PER_CALL,
+  ESTIMATED_VALUE_USD_PER_HOUR,
+  estimateImpact,
+  type ImpactEstimate,
+} from "@/lib/impact";
+import {
   computeFindings,
   cutoffDate,
   dailyTotals,
@@ -64,7 +71,6 @@ import {
   getLiveUsers,
   groupShares,
   isUnknownUser,
-  latencyStats,
   personHues,
   ridgeData,
   sumTotals,
@@ -84,6 +90,13 @@ type View = "overview" | "users" | "activity" | "agents" | "models";
 const API_BASE = (process.env.NEXT_PUBLIC_USAGE_API_URL || "http://127.0.0.1:4318").replace(/\/$/, "");
 const API_HOST = API_BASE.replace(/^https?:\/\//, "");
 const BOOT_MINIMUM_MS = 700;
+const roiFormat = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
+const spendFormat = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 9,
+});
 
 const VIEWS: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
@@ -107,6 +120,25 @@ const INITIAL_STAGES: BootStage[] = [
   { label: "Ledger", detail: "Usage, calls and catalog", state: "pending" },
   { label: "Composing", detail: "Charts and findings", state: "pending" },
 ];
+
+function impactRoiNote(impact: ImpactEstimate) {
+  if (impact.kind === "invalid-requests") return "ROI unavailable · invalid calls";
+  if (impact.roi.kind === "available") return `ROI ${roiFormat.format(impact.roi.multiple)}× vs est. spend`;
+  switch (impact.roi.reason) {
+    case "no-calls":
+      return "ROI unavailable · no calls";
+    case "no-spend":
+      return "ROI unavailable · no spend";
+    case "unpriced":
+      return "ROI unavailable · unpriced calls";
+    case "currency-unavailable":
+      return "ROI unavailable · currency missing";
+    case "currency-mismatch":
+      return "ROI unavailable · currency mismatch";
+    case "invalid-spend":
+      return "ROI unavailable · invalid spend";
+  }
+}
 
 function Segmented<T extends string | number>({
   label,
@@ -191,7 +223,7 @@ export default function Home() {
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [teams, setTeams] = useState<TeamData | null>(null);
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [currency, setCurrency] = useState("USD");
+  const [reportedCurrency, setReportedCurrency] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,6 +235,7 @@ export default function Home() {
   const searchRef = useRef<HTMLInputElement>(null);
   const bootPending = useRef(true);
   const composeStarted = useRef(0);
+  const currency = reportedCurrency || "USD";
 
   function updateStage(index: number, patch: Partial<BootStage>) {
     setStages((current) => current.map((stage, position) => (position === index ? { ...stage, ...patch } : stage)));
@@ -291,7 +324,7 @@ export default function Home() {
           composeStarted.current = performance.now();
         }
         setUsageRows(rows);
-        setCurrency(usagePayload.currency || "USD");
+        setReportedCurrency(typeof usagePayload.currency === "string" && usagePayload.currency ? usagePayload.currency : null);
         setCatalog(agentPayload);
         setTeams(normalizeTeams(usagePayload.teams));
         setCallEvents(events);
@@ -363,7 +396,7 @@ export default function Home() {
     [teamScoped, baseEvents, teams, selectedTeam],
   );
   const totals = useMemo(() => sumTotals(filteredRows), [filteredRows]);
-  const latency = useMemo(() => latencyStats(filteredEvents), [filteredEvents]);
+  const impact = useMemo(() => estimateImpact(totals, reportedCurrency), [totals, reportedCurrency]);
   const liveUsers = useMemo(() => getLiveUsers(callEvents, now), [callEvents, now]);
   const today = updatedAt ? updatedAt.toISOString().slice(0, 10) : null;
   const days = useMemo(() => {
@@ -419,7 +452,6 @@ export default function Home() {
   const sparks = useMemo(() => {
     const agents = days.map(() => new Set<string>());
     const models = days.map(() => new Set<string>());
-    const latencies = days.map(() => [] as number[]);
     const index = new Map(days.map((day, position) => [day, position]));
     for (const row of filteredRows) {
       const position = index.get(row.date);
@@ -428,18 +460,13 @@ export default function Home() {
       if (id) agents[position].add(id);
       models[position].add(row.model);
     }
-    for (const event of filteredEvents) {
-      const position = index.get(event.date);
-      if (position !== undefined && typeof event.latency_ms === "number" && event.latency_ms > 0) latencies[position].push(event.latency_ms);
-    }
     return {
       calls: dailyTotals(filteredRows, days, "calls"),
       tokens: dailyTotals(filteredRows, days, "tokens"),
       agents: agents.map((set) => set.size),
       models: models.map((set) => set.size),
-      latency: latencies.map((values) => (values.length ? values.sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0)),
     };
-  }, [filteredRows, filteredEvents, days, agentCatalog]);
+  }, [filteredRows, days, agentCatalog]);
   const teamOptions = teams ? [...teams.names, ...(baseRows.some((row) => teamOf(row.user, teams) === "Unassigned") ? ["Unassigned"] : [])] : [];
   const filtersActive =
     selectedUser !== "all" || selectedAgent !== "all" || selectedModel !== "all" || search !== "" || selectedTeam !== null;
@@ -840,7 +867,7 @@ export default function Home() {
               {view === "overview" && (
                 <>
                   <LiveStrip users={liveUsers} now={now} hues={hues} loading={loading} />
-                  <Stagger as="section" className="kpis" stagger={0.06} label={`Totals for the last ${period} days. Calls and tokens also choose the chart metric.`}>
+                  <Stagger as="section" className="kpis is-six" stagger={0.06} label={`Totals and estimated impact for the last ${period} days. Calls and tokens also choose the chart metric.`}>
                     <KpiCell
                       label="Active agents"
                       color="var(--c-lime)"
@@ -863,17 +890,59 @@ export default function Home() {
                     <KpiCell label="Models" color="var(--c-rose)" spark={sparks.models} note={modelLeader ? `Most calls: ${modelLeader.name}` : "No model calls in range"}>
                       <CountUp value={modelShares.length} locales="en-US" />
                     </KpiCell>
-                    <KpiCell label="Median latency" color="var(--c-sun)" spark={sparks.latency} note={latency.p95 ? `p95 ${formatSeconds(latency.p95)}` : "No latency recorded"}>
-                      {latency.median ? (
+                    <KpiCell
+                      label="Hours saved (est.)"
+                      color="var(--c-sun)"
+                      spark={sparks.calls}
+                      note={!updatedAt ? (error ? "Usage unavailable" : "Loading usage") : impact.kind === "invalid-requests" ? "Invalid call count" : `${ESTIMATED_MINUTES_PER_CALL} min / LLM call`}
+                    >
+                      {updatedAt && impact.kind === "available" ? (
                         <>
-                          <CountUp value={latency.median / 1000} locales="en-US" format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
-                          <span className="unit">s</span>
+                          <CountUp value={impact.hours} locales="en-US" format={{ notation: "compact", maximumFractionDigits: 1 }} />
+                          <span className="unit">h</span>
                         </>
                       ) : (
                         <span className="dash">—</span>
                       )}
                     </KpiCell>
+                    <KpiCell
+                      label="Value delivered (est.)"
+                      color="var(--c-cost)"
+                      spark={sparks.calls}
+                      wrapNote
+                      note={!updatedAt ? (error ? "Usage unavailable" : "Loading usage") : impactRoiNote(impact)}
+                    >
+                      {updatedAt && impact.kind === "available" ? (
+                        <CountUp value={impact.valueUsd} locales="en-US" format={{ style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }} />
+                      ) : (
+                        <span className="dash">—</span>
+                      )}
+                    </KpiCell>
                   </Stagger>
+
+                  <details className="impact-method">
+                    <summary>
+                      <Info size={14} aria-hidden="true" />
+                      <span>
+                        Illustrative, not measured · {ESTIMATED_MINUTES_PER_CALL} min / LLM call · {formatMoney(ESTIMATED_VALUE_USD_PER_HOUR, "USD", 0)} / hour
+                      </span>
+                      <span className="impact-method-more">How it works</span>
+                      <ChevronDown size={14} aria-hidden="true" />
+                    </summary>
+                    <p>
+                      Estimated hours are recorded LLM calls multiplied by {ESTIMATED_MINUTES_PER_CALL} minutes.
+                      Estimated value is those hours multiplied by {formatMoney(ESTIMATED_VALUE_USD_PER_HOUR, "USD", 0)} per hour.
+                      A task can contain multiple calls, including background or subagent calls; the tracker does not measure completed work or actual time saved.
+                    </p>
+                    <p>
+                      Estimated net ROI is (estimated value − estimated model spend) / estimated model spend.
+                      Model spend is the receiver&apos;s flat token-price estimate, not a provider invoice or Copilot subscription cost;
+                      it excludes other costs. ROI is unavailable when spend is zero, calls are unpriced, or the spend currency is not USD.
+                      {updatedAt && impact.kind === "available" && impact.roi.kind === "available" && (
+                        <> Estimated model spend for this selection: <strong>{spendFormat.format(totals.cost)}</strong>.</>
+                      )}
+                    </p>
+                  </details>
 
                   <OverviewCharts
                     days={days}
@@ -998,6 +1067,7 @@ function KpiCell({
   selected,
   onSelect,
   note,
+  wrapNote,
   children,
 }: {
   label: string;
@@ -1007,6 +1077,7 @@ function KpiCell({
   selected?: Metric;
   onSelect?: (metric: Metric) => void;
   note: ReactNode;
+  wrapNote?: boolean;
   children: ReactNode;
 }) {
   const reduced = useReducedMotion();
@@ -1016,7 +1087,7 @@ function KpiCell({
     <>
       <span className="kpi-label">{label}</span>
       <span className="kpi-value num">{children}</span>
-      <span className="kpi-note">{note}</span>
+      <span className={`kpi-note${wrapNote ? " is-wrapped" : ""}`}>{note}</span>
       <Sparkline className="kpi-spark" values={spark} color={color} />
     </>
   );

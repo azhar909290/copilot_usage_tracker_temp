@@ -674,6 +674,7 @@ kbd {
   gap: 14px;
   margin-top: calc(var(--gap) - var(--section-gap));
 }
+.kpis.is-six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .kpi {
   --kpi: var(--c-calls);
   position: relative;
@@ -723,9 +724,20 @@ button.kpi:active { transform: scale(0.985); }
 .kpi-value number-flow-react { --number-flow-char-height: 1em; --number-flow-mask-height: 0.18em; }
 .kpi-value .dash { font-size: 15px; }
 .kpi-note { position: relative; z-index: 1; max-width: 100%; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.kpi-note.is-wrapped { overflow: visible; line-height: 1.4; white-space: normal; }
 .kpi-spark { position: absolute; inset: auto 0 0 0; z-index: -1; width: 100%; height: 58px; pointer-events: none; }
 .kpi-spark path.line { fill: none; stroke: var(--kpi); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .kpi-spark path.area { opacity: 0.5; }
+
+.impact-method { margin-top: calc(10px - var(--section-gap)); color: var(--muted); font-size: 12px; line-height: 1.5; }
+.impact-method summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: fit-content; min-height: 28px; list-style: none; cursor: pointer; }
+.impact-method summary::-webkit-details-marker { display: none; }
+.impact-method summary svg { flex: none; }
+.impact-method summary svg:last-child { transition: transform 160ms ease; }
+.impact-method[open] summary svg:last-child { transform: rotate(180deg); }
+.impact-method-more { color: var(--text); font-weight: 600; }
+.impact-method p { max-width: 95ch; margin: 8px 0 0; }
+.impact-method strong { color: var(--text); }
 
 .chart-row { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); gap: var(--gap); margin-top: calc(var(--gap) - var(--section-gap)); }
 .chart-row > .block { display: flex; flex-direction: column; }
@@ -1529,6 +1541,9 @@ button.kpi:active { transform: scale(0.985); }
 .gh-user a:hover { text-decoration: underline 1px var(--c-calls); text-underline-offset: 4px; }
 
 /* ---------- responsive ---------- */
+@media (max-width: 1540px) {
+  .kpis.is-six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 1320px) {
   .team-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -1539,6 +1554,7 @@ button.kpi:active { transform: scale(0.985); }
   .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .kpis .kpi:nth-child(-n + 3) { grid-column: span 2; }
   .kpis .kpi:nth-child(n + 4) { grid-column: span 3; }
+  .kpis.is-six .kpi:nth-child(n) { grid-column: auto; }
   .kpis.is-four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpis.is-four .kpi { grid-column: auto; }
   .chart-row,
@@ -1596,6 +1612,7 @@ button.kpi:active { transform: scale(0.985); }
   .title-actions .button { width: var(--control-h); padding: 0; justify-content: center; }
   .toolbar-end { width: 100%; margin-left: 0; padding: 0 6px; justify-content: space-between; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpis.is-six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpis .kpi:nth-child(n) { grid-column: auto; min-height: 128px; padding: 14px 14px 46px; }
   .kpis .kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .kpi-value { font-size: 28px; line-height: 34px; min-height: 34px; }
