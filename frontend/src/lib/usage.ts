@@ -68,14 +68,33 @@ export type Filters = {
 
 export const DAY_MS = 86_400_000;
 export const LIVE_WINDOW_MS = 5 * 60_000;
+export const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
 export function isUnknownUser(name: string) {
   return name.trim().toLowerCase() === "unknown";
 }
 
+export function isAgentVerseAgent(agent: string | null | undefined, catalogNames?: Set<string>): boolean {
+  if (!agent) return false;
+  const trimmed = agent.trim().toLowerCase();
+  if (!trimmed || trimmed === "unknown") return false;
+  if (catalogNames && catalogNames.size > 0) {
+    return catalogNames.has(trimmed);
+  }
+  if (
+    trimmed.startsWith("copilot") ||
+    trimmed.startsWith("xtab") ||
+    trimmed.startsWith("debugcommand")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function cutoffDate(updatedAt: Date | null, period: Period) {
   if (!updatedAt) return null;
-  const today = Date.parse(`${updatedAt.toISOString().slice(0, 10)}T00:00:00Z`);
+  const istDateStr = new Date(updatedAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+  const today = Date.parse(`${istDateStr}T00:00:00Z`);
   return new Date(today - (period - 1) * DAY_MS).toISOString().slice(0, 10);
 }
 
@@ -175,7 +194,7 @@ export type RidgeData = {
 };
 
 /**
- * One ridge per receiver day. Each call adds a Gaussian kernel at its UTC time of day,
+ * One ridge per receiver day. Each call adds a Gaussian kernel at its IST time of day,
  * weighted by the metric, so the area under a ridge equals that day's total.
  */
 export function ridgeData(events: CallEvent[], days: string[], metric: Metric): RidgeData {
@@ -185,13 +204,15 @@ export function ridgeData(events: CallEvent[], days: string[], metric: Metric): 
   const norm = 60 / (RIDGE_SIGMA_MINUTES * Math.sqrt(2 * Math.PI));
   const reach = Math.ceil((RIDGE_SIGMA_MINUTES * 4) / RIDGE_SAMPLE_MINUTES);
   for (const event of events) {
-    const row = index.get(event.date);
-    if (row === undefined) continue;
     const time = Date.parse(event.timestamp);
     if (Number.isNaN(time)) continue;
+    const istTime = time + IST_OFFSET_MS;
+    const istDate = new Date(istTime).toISOString().slice(0, 10);
+    const row = index.get(istDate) ?? index.get(event.date);
+    if (row === undefined) continue;
     const weight = metricOfEvent(event, metric);
     if (!weight) continue;
-    const minute = (((time % DAY_MS) + DAY_MS) % DAY_MS) / 60_000;
+    const minute = (((istTime % DAY_MS) + DAY_MS) % DAY_MS) / 60_000;
     bins[row][Math.min(bins[row].length - 1, Math.floor(minute / RIDGE_BIN_MINUTES))] += weight;
     const center = Math.round(minute / RIDGE_SAMPLE_MINUTES);
     const first = Math.max(0, center - reach);
@@ -227,11 +248,13 @@ export function latencyStats(events: CallEvent[]) {
     .filter((value): value is number => typeof value === "number" && value > 0)
     .sort((a, b) => a - b);
   const count = values.length;
-  if (!count) return { median: null, p95: null, count };
+  if (!count) return { avg: null, median: null, p95: null, count };
+  const sum = values.reduce((total, val) => total + val, 0);
+  const avg = sum / count;
   const middle = Math.floor(count / 2);
   const median = count % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
   const p95 = values[Math.max(0, Math.ceil(0.95 * count) - 1)];
-  return { median, p95, count };
+  return { avg, median, p95, count };
 }
 
 /** Stable identity hues: alphabetical neighbours sit about 137° apart on the wheel. */
@@ -309,7 +332,8 @@ export function computeFindings({
   for (const event of events) {
     const time = Date.parse(event.timestamp);
     if (Number.isNaN(time)) continue;
-    halfHours[Math.floor((((time % DAY_MS) + DAY_MS) % DAY_MS) / 1_800_000)] += 1;
+    const istTime = time + IST_OFFSET_MS;
+    halfHours[Math.floor((((istTime % DAY_MS) + DAY_MS) % DAY_MS) / 1_800_000)] += 1;
   }
   const timedCalls = halfHours.reduce((sum, value) => sum + value, 0);
   const peak = halfHours.indexOf(Math.max(...halfHours));
@@ -318,8 +342,8 @@ export function computeFindings({
       id: "peak-time",
       label: "Peak half-hour",
       figure: formatClock(peak * 30),
-      unit: "UTC",
-      text: `is the busiest half-hour: ${formatCount(halfHours[peak])} of ${formatCount(timedCalls)} calls (${percent(halfHours[peak], timedCalls)}%) started between ${formatClock(peak * 30)} and ${formatClock(peak * 30 + 30)} UTC.`,
+      unit: "IST",
+      text: `is the busiest half-hour: ${formatCount(halfHours[peak])} of ${formatCount(timedCalls)} calls (${percent(halfHours[peak], timedCalls)}%) started between ${formatClock(peak * 30)} and ${formatClock(peak * 30 + 30)} IST.`,
       action: { kind: "activity", label: "Open activity" },
     });
   }

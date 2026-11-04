@@ -114,7 +114,7 @@ const labels: Record<string, string> = {
   agent_edit: "Agent / edit", copilot_cli: "Copilot CLI", copilot_app: "Copilot app",
 };
 const featureLabel = (value: string) => labels[value] || value.replaceAll("_", " ");
-const dateLabel = (value: string | null) => value ? new Date(value.length === 10 ? `${value}T00:00:00Z` : value).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }) : "Not reported";
+const dateLabel = (value: string | null) => value ? new Date(value.length === 10 ? `${value}T12:00:00+05:30` : value).toLocaleDateString("en-US", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", year: "numeric" }) : "Not reported";
 const windowLabel = (window: Window) => `${dateLabel(window.start)} – ${dateLabel(window.end)}`;
 const tabs: { id: Tab; label: string; icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", icon: Activity },
@@ -286,7 +286,7 @@ export default function GitHubMetricsPage() {
             {data ? <>
               <span>{data.organization}</span><span aria-hidden="true">·</span>
               <span>{org ? windowLabel(org.window) : "Organization report unavailable"}</span><span aria-hidden="true">·</span>
-              <span className="freshness" data-state={error ? "error" : "ok"}><i aria-hidden="true" />Fetched {new Date(data.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+              <span className="freshness" data-state={error ? "error" : "ok"}><i aria-hidden="true" />Fetched {new Date(data.fetched_at).toLocaleTimeString([], { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST</span>
             </> : <span>Adoption, people and model usage from GitHub&apos;s organization reports.</span>}
           </p>
         </div>
@@ -327,7 +327,7 @@ export default function GitHubMetricsPage() {
         {tab === "overview" && <>
           <div className="chart-row" style={{ marginTop: 0 }}>
             <section className="block">
-              <header className="block-head"><div className="block-title"><h2>Daily Copilot activity</h2><p>Prompts and code generations per UTC day</p></div></header>
+              <header className="block-head"><div className="block-title"><h2>Daily Copilot activity</h2><p>Prompts and code generations per day (IST)</p></div></header>
               {org?.daily.length ? <>
                 <div className="area-chart"><ResponsiveContainer width="100%" height={214}><AreaChart data={org.daily} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
                   <CartesianGrid vertical={false} />
@@ -397,7 +397,7 @@ export default function GitHubMetricsPage() {
           </>}
         </section>}
       </div>}
-      {data && <footer className="status-footer"><span>GitHub snapshot <span className="num">{new Date(data.fetched_at).toLocaleString()}</span> · server cache <span className="num">{data.cache_seconds / 60}</span> minutes</span><span>GitHub REST API · no OTLP data mixed in</span></footer>}
+      {data && <footer className="status-footer"><span>GitHub snapshot <span className="num">{new Date(data.fetched_at).toLocaleString("en-US", { timeZone: "Asia/Kolkata" })} IST</span> · server cache <span className="num">{data.cache_seconds / 60}</span> minutes</span><span>GitHub REST API · no OTLP data mixed in</span></footer>}
     </main>
   </div></>;
 }

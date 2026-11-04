@@ -5,7 +5,7 @@ import { useAnimationActive } from "@/lib/animation";
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { formatCount } from "@/lib/format";
 import { teamColor, teamOf, type TeamData } from "@/lib/teams";
-import { isUnknownUser, type CallEvent } from "@/lib/usage";
+import { isAgentVerseAgent, isUnknownUser, type CallEvent } from "@/lib/usage";
 
 type Layer = "team" | "person" | "agent" | "model";
 type NetNode = { id: string; layer: Layer; label: string; weight: number; color: string; x: number; y: number; r: number };
@@ -14,7 +14,7 @@ type NetEdge = { id: string; from: string; to: string; weight: number; color: st
 const LAYERS: { key: Layer; title: string; limit: number }[] = [
   { key: "team", title: "Teams", limit: 6 },
   { key: "person", title: "People", limit: 8 },
-  { key: "agent", title: "Agents", limit: 8 },
+  { key: "agent", title: "AgentVerse Agents", limit: 8 },
   { key: "model", title: "Models", limit: 6 },
 ];
 const LAYER_COLOR: Record<Exclude<Layer, "team">, string> = {
@@ -35,10 +35,18 @@ function shorten(text: string, max: number) {
 }
 
 /**
- * Calls drawn as a four-layer network: teams → people → agents → models. Node size and link width
+ * Calls drawn as a four-layer network: teams → people → AgentVerse agents → models. Node size and link width
  * follow call counts; signals travel each link at a pace set by its traffic.
  */
-export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: TeamData | null }) {
+export function NeuralFlow({
+  events,
+  teams,
+  catalogNames,
+}: {
+  events: CallEvent[];
+  teams: TeamData | null;
+  catalogNames?: Set<string>;
+}) {
   const reduced = useReducedMotion();
   const uid = useId().replace(/:/g, "");
   const frameRef = useRef<HTMLDivElement>(null);
@@ -63,6 +71,7 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
     const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
     for (const event of events) {
       if (isUnknownUser(event.user)) continue;
+      if (!isAgentVerseAgent(event.agent, catalogNames)) continue;
       const team = teamOf(event.user, teams);
       bump(counts.team, team);
       bump(counts.person, event.user);
@@ -74,7 +83,7 @@ export function NeuralFlow({ events, teams }: { events: CallEvent[]; teams: Team
     }
     const chosen = Object.fromEntries(LAYERS.map((layer) => [layer.key, top(counts[layer.key], layer.limit)])) as Record<Layer, [string, number][]>;
     return { chosen, pairs };
-  }, [events, teams]);
+  }, [events, teams, catalogNames]);
 
   const layout = useMemo(() => {
     if (!width) return { nodes: [] as NetNode[], edges: [] as NetEdge[], columns: [] as number[] };

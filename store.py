@@ -5,9 +5,12 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from user_mapping import normalize_user, FILE_EXTENSION_PATTERN
 from teams import DemoTeams
+
+DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "Asia/Kolkata"))
 
 DAILY_FIELDS = [
     "date", "user", "agent", "model",
@@ -43,6 +46,15 @@ class UsageStore:
             user = "unknown"
         e["user"] = user
 
+        if e.get("timestamp"):
+            timestamp = datetime.fromisoformat(e["timestamp"])
+            if timestamp.tzinfo is None:
+                raise ValueError("Usage event timestamp must include a timezone")
+            e["date"] = timestamp.astimezone(DAILY_TZ).date().isoformat()
+            ts_utc = timestamp.astimezone(timezone.utc).isoformat()
+        else:
+            ts_utc = None
+
         k = (e["date"], user, e["agent"], e["model"])
         r = self._daily.setdefault(
             k,
@@ -50,13 +62,9 @@ class UsageStore:
                  cost=0.0, unpriced_requests=0, latency_ms_total=0.0, latency_requests=0,
                  first_seen=None, last_seen=None),
         )
-        if e.get("timestamp"):
-            timestamp = datetime.fromisoformat(e["timestamp"])
-            if timestamp.tzinfo is None:
-                raise ValueError("Usage event timestamp must include a timezone")
-            timestamp = timestamp.astimezone(timezone.utc).isoformat()
-            r["first_seen"] = min(r["first_seen"] or timestamp, timestamp)
-            r["last_seen"] = max(r["last_seen"] or timestamp, timestamp)
+        if ts_utc:
+            r["first_seen"] = min(r["first_seen"] or ts_utc, ts_utc)
+            r["last_seen"] = max(r["last_seen"] or ts_utc, ts_utc)
         r["requests"] += 1
         r["input_tokens"] += e["input_tokens"]
         r["output_tokens"] += e["output_tokens"]

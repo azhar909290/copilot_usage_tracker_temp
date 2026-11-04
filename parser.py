@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from user_mapping import normalize_user, IGNORED_USERS
 
-DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "UTC"))
+DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "Asia/Kolkata"))
 # Spans that only roll up their children's tokens would double count.
 SKIP_OPERATIONS = set(
     filter(None, os.getenv("SKIP_OPERATIONS", "invoke_agent").split(","))

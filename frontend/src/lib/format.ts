@@ -35,12 +35,16 @@ export function formatSeconds(ms: number | null | undefined) {
 }
 
 export function displayDate(date: string, options?: Intl.DateTimeFormatOptions) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", options);
+  return new Date(`${date}T12:00:00+05:30`).toLocaleDateString("en-US", {
+    timeZone: "Asia/Kolkata",
+    ...options,
+  });
 }
 
 export function displayCallTime(timestamp: string | null | undefined) {
   if (!timestamp) return "Time unavailable";
   return new Date(timestamp).toLocaleString("en-US", {
+    timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "short",
     day: "numeric",

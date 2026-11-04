@@ -3,7 +3,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { displayCallTime, displayDate, formatCompact, formatCount, formatMoney, formatSeconds } from "@/lib/format";
 import type { TeamData } from "@/lib/teams";
-import type { CallEvent, Share, Totals } from "@/lib/usage";
+import { isAgentVerseAgent, type CallEvent, type CatalogResponse, type Share, type Totals } from "@/lib/usage";
 import { Donut } from "./charts";
 import { ModelPodium } from "./ModelPodium";
 import { NeuralFlow } from "./NeuralFlow";
@@ -157,9 +157,15 @@ function CallCalendar({ events, days, today, onPickDay }: { events: CallEvent[];
     const counts = new Map<string, number>();
     const hours = new Array<number>(24).fill(0);
     for (const event of events) {
-      counts.set(event.date, (counts.get(event.date) ?? 0) + 1);
       const time = new Date(event.timestamp);
-      if (!Number.isNaN(time.getTime())) hours[time.getHours()] += 1;
+      const istDate = !Number.isNaN(time.getTime())
+        ? new Date(time.getTime() + 19_800_000).toISOString().slice(0, 10)
+        : event.date;
+      counts.set(istDate, (counts.get(istDate) ?? 0) + 1);
+      if (!Number.isNaN(time.getTime())) {
+        const istHour = new Date(time.getTime() + 19_800_000).getUTCHours();
+        hours[istHour] += 1;
+      }
     }
     let max = 0;
     let peakDay = "";
@@ -241,14 +247,14 @@ function CallCalendar({ events, days, today, onPickDay }: { events: CallEvent[];
           </div>
         ))}
       </div>
-      <div className="cal-hours" role="img" aria-label={peakHour >= 0 ? `Calls by hour of the day, local time. Busiest hour ${String(peakHour).padStart(2, "0")}:00 with ${hourMax} calls.` : "No timed calls."}>
-        <span className="cal-hours-title">Hour of day</span>
+      <div className="cal-hours" role="img" aria-label={peakHour >= 0 ? `Calls by hour of the day, IST. Busiest hour ${String(peakHour).padStart(2, "0")}:00 IST with ${hourMax} calls.` : "No timed calls."}>
+        <span className="cal-hours-title">Hour of day (IST)</span>
         <div className="cal-bars">
           {hours.map((value, hour) => (
             <i
               key={hour}
               data-peak={hour === peakHour || undefined}
-              title={`${String(hour).padStart(2, "0")}:00 · ${formatCount(value)} calls`}
+              title={`${String(hour).padStart(2, "0")}:00 IST · ${formatCount(value)} calls`}
               style={{ "--h": hourMax ? Math.max(value ? 0.06 : 0, value / hourMax) : 0, "--i": hour } as CSSProperties}
             />
           ))}
@@ -274,6 +280,7 @@ export function ActivityView({
   teams,
   days,
   today,
+  catalog,
   onPickDay,
 }: {
   events: CallEvent[];
@@ -283,6 +290,7 @@ export function ActivityView({
   teams: TeamData | null;
   days: string[];
   today: string;
+  catalog?: CatalogResponse | null;
   onPickDay: (date: string) => void;
 }) {
   type Key = "timestamp" | "user" | "agent" | "model" | "input_tokens" | "output_tokens" | "total_tokens" | "latency_ms" | "cost";
@@ -293,11 +301,32 @@ export function ActivityView({
     if (key === "timestamp") return Date.parse(event.timestamp || event.date || "1970-01-01");
     return event[key] ?? (typeof event.input_tokens === "number" ? -1 : "");
   });
+
+  const catalogNames = useMemo(() => {
+    if (!catalog?.agents?.length) return undefined;
+    const set = new Set<string>();
+    for (const a of catalog.agents) {
+      if (a.kind === "skill_package") continue;
+      set.add(a.id.trim().toLowerCase());
+      set.add(a.name.trim().toLowerCase());
+    }
+    return set;
+  }, [catalog]);
+
+  const agentVerseCalls = useMemo(
+    () => events.filter((e) => isAgentVerseAgent(e.agent, catalogNames)),
+    [events, catalogNames],
+  );
+
   const agents = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const event of events) counts.set(event.agent, (counts.get(event.agent) ?? 0) + 1);
+    for (const event of events) {
+      if (isAgentVerseAgent(event.agent, catalogNames)) {
+        counts.set(event.agent, (counts.get(event.agent) ?? 0) + 1);
+      }
+    }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7);
-  }, [events]);
+  }, [events, catalogNames]);
   const topAgent = agents[0]?.[1] ?? 1;
 
   return (
@@ -306,13 +335,13 @@ export function ActivityView({
         <header className="block-head">
           <div className="block-title">
             <h2>Signal network</h2>
-            <p>How calls flow from teams to people, agents and models. Link width and signal pace follow call volume.</p>
+            <p>How calls flow from teams to people, AgentVerse agents and models. Link width and signal pace follow call volume.</p>
           </div>
           <span className="muted">
-            <span className="num">{formatCount(events.length)}</span> calls traced
+            <span className="num">{formatCount(agentVerseCalls.length)}</span> AgentVerse calls traced
           </span>
         </header>
-        <NeuralFlow events={events} teams={teams} />
+        <NeuralFlow events={events} teams={teams} catalogNames={catalogNames} />
       </Reveal>
       <div className="activity-pair">
         <Reveal as="section" className="block">
@@ -327,9 +356,12 @@ export function ActivityView({
         <Reveal as="section" className="block" delay={0.08}>
           <header className="block-head">
             <div className="block-title">
-              <h2>Busiest agents</h2>
-              <p>Calls in the filtered range</p>
+              <h2>Busiest AgentVerse agents</h2>
+              <p>Top custom agents by invocation count</p>
             </div>
+            <span className="muted">
+              <span className="num">{agents.length}</span> active
+            </span>
           </header>
           {agents.length ? (
             <ol className="leader">
@@ -352,7 +384,7 @@ export function ActivityView({
         <header className="block-head">
           <div className="block-title">
             <h2>Recorded calls</h2>
-            <p>Every model call in range, in your local time</p>
+            <p>Every model call in range, in IST</p>
           </div>
           <span className="muted">
             <span className="num">{formatCount(events.length)}</span> calls
@@ -362,7 +394,7 @@ export function ActivityView({
           <table className="table">
             <thead>
               <tr>
-                <SortHeader sortKey="timestamp" label="Time (local)" sort={sort} onSort={onSort} />
+                <SortHeader sortKey="timestamp" label="Time (IST)" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="user" label="User" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="agent" label="Agent" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="model" label="Model" sort={sort} onSort={onSort} />
@@ -380,7 +412,7 @@ export function ActivityView({
                     <time dateTime={event.timestamp} title={displayCallTime(event.timestamp)}>
                       {Number.isNaN(Date.parse(event.timestamp))
                         ? "Time unavailable"
-                        : new Date(event.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        : new Date(event.timestamp).toLocaleString("en-US", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
                     </time>
                   </td>
                   <td>
