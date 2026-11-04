@@ -115,7 +115,8 @@ export function SignalRidge({
   useEffect(() => {
     const update = () => {
       const now = new Date();
-      setNowMinute(now.getUTCHours() * 60 + now.getUTCMinutes());
+      const istMinutes = Math.floor((now.getTime() + 19_800_000) / 60_000) % 1440;
+      setNowMinute(istMinutes);
     };
     update();
     const timer = window.setInterval(update, 60_000);
@@ -154,12 +155,12 @@ export function SignalRidge({
             </span>
             {bin !== null && binValue !== null ? (
               <span>
-                {formatClock(bin * RIDGE_BIN_MINUTES)}–{formatClock((bin + 1) * RIDGE_BIN_MINUTES)} UTC:{" "}
+                {formatClock(bin * RIDGE_BIN_MINUTES)}–{formatClock((bin + 1) * RIDGE_BIN_MINUTES)} IST:{" "}
                 <span className="num">{formatMetric(binValue, metric, currency)}</span>
               </span>
             ) : peakBin >= 0 ? (
               <span>
-                busiest {formatClock(peakBin * RIDGE_BIN_MINUTES)}–{formatClock((peakBin + 1) * RIDGE_BIN_MINUTES)} UTC
+                busiest {formatClock(peakBin * RIDGE_BIN_MINUTES)}–{formatClock((peakBin + 1) * RIDGE_BIN_MINUTES)} IST
               </span>
             ) : (
               <span>no calls this day</span>

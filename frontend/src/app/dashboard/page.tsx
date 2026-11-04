@@ -365,7 +365,7 @@ export default function Home() {
   const totals = useMemo(() => sumTotals(filteredRows), [filteredRows]);
   const latency = useMemo(() => latencyStats(filteredEvents), [filteredEvents]);
   const liveUsers = useMemo(() => getLiveUsers(callEvents, now), [callEvents, now]);
-  const today = updatedAt ? updatedAt.toISOString().slice(0, 10) : null;
+  const today = updatedAt ? new Date(updatedAt.getTime() + 19_800_000).toISOString().slice(0, 10) : null;
   const days = useMemo(() => {
     if (!today || !filters.cutoff) return [];
     const latest = filteredRows.reduce((last, row) => (row.date > last ? row.date : last), today);
@@ -647,10 +647,10 @@ export default function Home() {
   const scope = selectedUser !== "all" ? selectedUser : selectedTeam ? `${selectedTeam} team` : "All teams";
   const freshness = error
     ? updatedAt
-      ? `Couldn’t refresh · last good ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      ? `Couldn’t refresh · last good ${updatedAt.toLocaleTimeString([], { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST`
       : "Receiver unreachable"
     : updatedAt
-      ? `Updated ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      ? `Updated ${updatedAt.toLocaleTimeString([], { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST`
       : "Connecting";
   // The overview headline leads with usage, not cost.
   const lead = findings.find((finding) => finding.id !== "cost-driver" && finding.id !== "unpriced");
@@ -814,7 +814,7 @@ export default function Home() {
               <span>
                 Couldn’t load usage from {API_HOST}.{" "}
                 {updatedAt
-                  ? `Showing data from ${updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
+                  ? `Showing data from ${updatedAt.toLocaleTimeString([], { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST.`
                   : "Nothing has loaded yet."}{" "}
                 <span className="muted">{error}</span>
               </span>
@@ -1100,7 +1100,7 @@ const OverviewCharts = memo(function OverviewCharts({
             <h2>Daily rhythm</h2>
             <p>{noun} by time of day, one line per day, newest in front</p>
           </div>
-          <span className="muted">UTC · 18-min smoothing</span>
+          <span className="muted">IST · 18-min smoothing</span>
         </header>
         <SignalRidge
           data={ridge}
@@ -1275,7 +1275,7 @@ function RecentCalls({
                           ? "Time unavailable"
                           : now && now - time < 3_600_000
                             ? formatAgo(time, now)
-                            : new Date(time).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                            : new Date(time).toLocaleString("en-US", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
                       </time>
                     </td>
                     <td>

@@ -157,9 +157,15 @@ function CallCalendar({ events, days, today, onPickDay }: { events: CallEvent[];
     const counts = new Map<string, number>();
     const hours = new Array<number>(24).fill(0);
     for (const event of events) {
-      counts.set(event.date, (counts.get(event.date) ?? 0) + 1);
       const time = new Date(event.timestamp);
-      if (!Number.isNaN(time.getTime())) hours[time.getHours()] += 1;
+      const istDate = !Number.isNaN(time.getTime())
+        ? new Date(time.getTime() + 19_800_000).toISOString().slice(0, 10)
+        : event.date;
+      counts.set(istDate, (counts.get(istDate) ?? 0) + 1);
+      if (!Number.isNaN(time.getTime())) {
+        const istHour = new Date(time.getTime() + 19_800_000).getUTCHours();
+        hours[istHour] += 1;
+      }
     }
     let max = 0;
     let peakDay = "";
@@ -241,14 +247,14 @@ function CallCalendar({ events, days, today, onPickDay }: { events: CallEvent[];
           </div>
         ))}
       </div>
-      <div className="cal-hours" role="img" aria-label={peakHour >= 0 ? `Calls by hour of the day, local time. Busiest hour ${String(peakHour).padStart(2, "0")}:00 with ${hourMax} calls.` : "No timed calls."}>
-        <span className="cal-hours-title">Hour of day</span>
+      <div className="cal-hours" role="img" aria-label={peakHour >= 0 ? `Calls by hour of the day, IST. Busiest hour ${String(peakHour).padStart(2, "0")}:00 IST with ${hourMax} calls.` : "No timed calls."}>
+        <span className="cal-hours-title">Hour of day (IST)</span>
         <div className="cal-bars">
           {hours.map((value, hour) => (
             <i
               key={hour}
               data-peak={hour === peakHour || undefined}
-              title={`${String(hour).padStart(2, "0")}:00 · ${formatCount(value)} calls`}
+              title={`${String(hour).padStart(2, "0")}:00 IST · ${formatCount(value)} calls`}
               style={{ "--h": hourMax ? Math.max(value ? 0.06 : 0, value / hourMax) : 0, "--i": hour } as CSSProperties}
             />
           ))}
@@ -352,7 +358,7 @@ export function ActivityView({
         <header className="block-head">
           <div className="block-title">
             <h2>Recorded calls</h2>
-            <p>Every model call in range, in your local time</p>
+            <p>Every model call in range, in IST</p>
           </div>
           <span className="muted">
             <span className="num">{formatCount(events.length)}</span> calls
@@ -362,7 +368,7 @@ export function ActivityView({
           <table className="table">
             <thead>
               <tr>
-                <SortHeader sortKey="timestamp" label="Time (local)" sort={sort} onSort={onSort} />
+                <SortHeader sortKey="timestamp" label="Time (IST)" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="user" label="User" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="agent" label="Agent" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="model" label="Model" sort={sort} onSort={onSort} />
@@ -380,7 +386,7 @@ export function ActivityView({
                     <time dateTime={event.timestamp} title={displayCallTime(event.timestamp)}>
                       {Number.isNaN(Date.parse(event.timestamp))
                         ? "Time unavailable"
-                        : new Date(event.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        : new Date(event.timestamp).toLocaleString("en-US", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
                     </time>
                   </td>
                   <td>

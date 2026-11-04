@@ -211,8 +211,8 @@ Rows also include `first_seen` and `last_seen`: the earliest and latest call
 start timestamps in each daily group, normalized to UTC. These fields are also
 included in `daily_usage.csv` and dashboard CSV exports. The Activity table
 displays both in the browser's local timezone, and Recent activity shows the
-last call time and sorts by it. Daily grouping still uses `DAILY_TZ` (UTC by
-default), so the local call date may differ from the group's date. Historical
+last call time and sorts by it. Daily grouping uses `DAILY_TZ` (Asia/Kolkata / IST by
+default). Historical
 events without timestamps show "Time unavailable"; no midnight time is invented.
 The latency average includes only spans with valid start and end timestamps;
 it is LLM-call latency, not total agent execution time. Old ledger entries still

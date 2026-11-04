@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from user_mapping import normalize_user, IGNORED_USERS
 
-DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "UTC"))
+DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "Asia/Kolkata"))
 # Spans that only roll up their children's tokens would double count.
 SKIP_OPERATIONS = set(
     filter(None, os.getenv("SKIP_OPERATIONS", "invoke_agent").split(","))
@@ -326,7 +326,7 @@ def parse_spans(payload: dict, price_book) -> list[dict]:
                 "output_tokens": out_tok,
                 "total_tokens": in_tok + out_tok,
                 "latency_ms": latency_ms,
-                "cost": round(cost, 8) if cost is not None else 0.0,
+                "cost": round(cost, 10) if cost is not None else 0.0,
                 "priced": cost is not None,
             }
             if u == "unknown":
