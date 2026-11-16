@@ -26,3 +26,6 @@ data/team_assignments.json
 .DS_Store
 Thumbs.db
 .vscode/settings.json
+
+*zone
+*:Zone.Identifier
