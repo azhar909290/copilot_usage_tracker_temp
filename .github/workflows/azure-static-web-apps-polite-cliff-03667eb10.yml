@@ -19,7 +19,21 @@ jobs:
         with:
           submodules: true
           lfs: false
+      - name: Set up Node.js for PR build
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: "22"
+      - name: Build pull request without a staging environment
+        if: github.event_name == 'pull_request'
+        working-directory: ./frontend
+        env:
+          NEXT_PUBLIC_USAGE_API_URL: https://otel-data-h3f2g0fqgrc4e6bn.westindia-01.azurewebsites.net
+        run: |
+          npm ci
+          npm run build
       - name: Build And Deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         env:
