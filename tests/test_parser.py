@@ -2,8 +2,8 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from parser import parse_spans
-from pricing import PriceBook
+from tracker.parser import parse_spans
+from tracker.pricing import PriceBook
 
 
 def attribute(key, value):

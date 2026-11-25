@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 
-import server
-from store import UsageStore
-from telemetry import AgentTelemetry
-from teams import TEAM_NAMES
-from test_store import event
+from tracker import server
+from tracker.store import UsageStore
+from tracker.telemetry import AgentTelemetry
+from tracker.teams import TEAM_NAMES
+from tests.test_store import event
 
 
 class AgentTelemetryTests(unittest.TestCase):
@@ -64,7 +64,10 @@ class AgentTelemetryTests(unittest.TestCase):
                     self.assertEqual(row["first_seen"], row["last_seen"])
                     self.assertGreaterEqual(row["latency_ms_avg"], 0)
                     self.assertAlmostEqual(row["cost"], 0.00000012)
-                events = server.usage()["events"]
+                self.assertNotIn("events", server.usage())
+                payload = server.activity_events()
+                self.assertEqual(payload["total"], 2)
+                events = payload["events"]
                 self.assertEqual(len(events), 2)
                 self.assertEqual(events[0]["agent"], "Planner")
                 self.assertEqual(events[1]["agent"], "Reviewer")

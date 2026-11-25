@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from user_mapping import normalize_user, FILE_EXTENSION_PATTERN
-from teams import DemoTeams
+from tracker.user_mapping import normalize_user, FILE_EXTENSION_PATTERN
+from tracker.teams import DemoTeams
 
 DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "Asia/Kolkata"))
 
@@ -166,7 +166,7 @@ class UsageStore:
             [dict(date=d, **{**t, "cost": round(t["cost"], 9)}) for d, t in sorted(totals.items())],
         )
 
-    def summary(self) -> list[dict]:
+    def summary(self, since: str | None = None) -> list[dict]:
         with self._lock:
             return [
                  dict(date=d, user=u, agent=a, model=m,
@@ -174,13 +174,28 @@ class UsageStore:
                      latency_ms_avg=(r["latency_ms_total"] / r["latency_requests"]
                                   if r["latency_requests"] else None))
                 for (d, u, a, m), r in sorted(self._daily.items())
+                if since is None or d >= since
             ]
 
-    def get_events(self, limit: int | None = None) -> list[dict]:
+    def get_events(self, limit: int | None = None, offset: int = 0, since: str | None = None) -> list[dict]:
         with self._lock:
+            events = self._events
+            if since:
+                events = [e for e in events if e.get("date", "") >= since]
+            if offset > 0:
+                events = events[offset:]
+                if limit and limit > 0:
+                    return list(events[:limit])
+                return list(events)
             if limit and limit > 0:
-                return self._events[-limit:]
-            return list(self._events)
+                return list(events[-limit:])
+            return list(events)
+
+    def event_count(self, since: str | None = None) -> int:
+        with self._lock:
+            if since:
+                return sum(1 for e in self._events if e.get("date", "") >= since)
+            return len(self._events)
 
     def get_teams(self) -> dict:
         with self._lock:

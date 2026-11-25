@@ -11,8 +11,8 @@ from fastapi import HTTPException
 import requests
 import uvicorn
 
-import server
-from github_metrics import (
+from tracker import server
+from tracker.github_metrics import (
     API_VERSION, COUNTERS, MAX_REPORT_BYTES, GitHubMetrics, GitHubMetricsError,
     _decode_report, _summarize_organization, _summarize_users,
 )
@@ -142,7 +142,7 @@ class ReportTests(unittest.TestCase):
 class GitHubClientTests(unittest.TestCase):
     def test_api_headers_and_permission_errors_do_not_expose_credentials(self):
         client = GitHubMetrics()
-        with patch("github_metrics.requests.get") as get:
+        with patch("tracker.github_metrics.requests.get") as get:
             get.return_value = Mock(status_code=200)
             get.return_value.json.return_value = {"download_links": []}
             self.assertEqual(client._get_json("/orgs/test/copilot/metrics/reports/users-28-day/latest", "secret"),
@@ -162,7 +162,7 @@ class GitHubClientTests(unittest.TestCase):
         response.iter_content.return_value = [json.dumps(user_records()).encode()]
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
-        with patch("github_metrics.requests.get", return_value=response) as get:
+        with patch("tracker.github_metrics.requests.get", return_value=response) as get:
             records = GitHubMetrics()._download(
                 "https://reports.blob.core.windows.net/report?signature=secret",
             )
@@ -178,7 +178,7 @@ class GitHubClientTests(unittest.TestCase):
             "https://reports.blob.core.windows.net:1234/report",
             "https://copilot-reports.github.com.evil.test/report",
         ):
-            with patch("github_metrics.requests.get") as get:
+            with patch("tracker.github_metrics.requests.get") as get:
                 with self.assertRaises(GitHubMetricsError):
                     GitHubMetrics()._download(url)
                 get.assert_not_called()
@@ -188,7 +188,7 @@ class GitHubClientTests(unittest.TestCase):
         response.iter_content.return_value = [json.dumps(user_records()).encode()]
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
-        with patch("github_metrics.requests.get", return_value=response) as get:
+        with patch("tracker.github_metrics.requests.get", return_value=response) as get:
             records = GitHubMetrics()._download(
                 "https://copilot-reports.github.com/report?signature=secret",
             )

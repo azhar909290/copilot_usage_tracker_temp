@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-import marketplace
+from tracker import marketplace
 
 
 AGENT_PATH = ".github/agents/a1.1-product-discovery.agent.md"

@@ -73,4 +73,5 @@ jobs:
         with:
           app-name: 'otel-data'
           slot-name: 'Production'
+          startup-command: 'python -m uvicorn tracker.server:app --host 0.0.0.0 --port 8000'
           

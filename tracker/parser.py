@@ -5,7 +5,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from user_mapping import normalize_user, IGNORED_USERS
+from tracker.user_mapping import normalize_user, IGNORED_USERS
 
 DAILY_TZ = ZoneInfo(os.getenv("DAILY_TZ", "Asia/Kolkata"))
 # Spans that only roll up their children's tokens would double count.

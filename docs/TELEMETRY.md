@@ -90,7 +90,7 @@ LLM sub-calls in that trace to that user — including background spans like
 Your `managed-settings.json` is already correct for org-wide use. No changes needed.
 The only reason tokens land in `unknown` is that background sub-spans (streaming
 completions, title generators) arrive at the receiver before the root session span
-that carries the identity. The trace-level identity cache added to `parser.py`
+that carries the identity. The trace-level identity cache added to `tracker/parser.py`
 resolves this — within a single request batch.
 
 For Copilot custom agents, the tracker prefers `copilot_chat.mode_name` on the

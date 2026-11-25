@@ -1,9 +1,11 @@
 """OTLP/HTTP receiver that prices GenAI spans from VS Code / Copilot / custom agents."""
 import gzip
 import hmac
+from datetime import datetime, timedelta
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 
@@ -15,11 +17,12 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
 
-from parser import parse_spans
-from github_metrics import GitHubMetrics, GitHubMetricsError
-from marketplace import MarketplaceCatalog
-from pricing import PriceBook
-from store import UsageStore
+from tracker.parser import parse_spans
+from tracker.github_metrics import GitHubMetrics, GitHubMetricsError
+from tracker.marketplace import MarketplaceCatalog
+from tracker.pricing import PriceBook
+from starlette.middleware.gzip import GZipMiddleware
+from tracker.store import DAILY_TZ, UsageStore
 from azure.monitor.opentelemetry import configure_azure_monitor
 
 
@@ -64,6 +67,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 prices = PriceBook()
 store = UsageStore(os.getenv("DATA_DIR", "data"))
 marketplace = MarketplaceCatalog(os.path.join(store.dir, "marketplace_cache.json"))
@@ -192,11 +196,13 @@ async def ignore(request: Request):
     operation_id="get_usage_summary",
     tags=["Usage"],
 )
-def usage():
+def usage(days: int | None = None):
+    since = None
+    if days is not None and days > 0:
+        since = (datetime.now(DAILY_TZ).date() - timedelta(days=days - 1)).isoformat()
     return {
         "currency": prices.currency,
-        "rows": store.summary(),
-        "events": store.get_events(),
+        "rows": store.summary(since=since),
         "teams": store.get_teams(),
     }
 
@@ -215,10 +221,14 @@ def usage():
     operation_id="get_events",
     tags=["Usage"],
 )
-def activity_events(limit: int = 10000):
+def activity_events(limit: int = 10000, offset: int = 0, days: int | None = None):
+    since = None
+    if days is not None and days > 0:
+        since = (datetime.now(DAILY_TZ).date() - timedelta(days=days - 1)).isoformat()
     return {
         "currency": prices.currency,
-        "events": store.get_events(limit=limit),
+        "total": store.event_count(since=since),
+        "events": store.get_events(limit=limit, offset=offset, since=since),
     }
 
 
@@ -269,6 +279,19 @@ def get_github_metrics():
     except GitHubMetricsError as error:
         log.warning("github_metrics_unavailable error=%s", error)
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+def _warm_marketplace() -> None:
+    try:
+        marketplace.get()
+    except Exception:
+        log.warning("marketplace_warmup_failed", exc_info=True)
+
+
+@app.on_event("startup")
+async def warm_caches():
+    """Pre-fetch the agent marketplace in the background so startup isn't blocked on GitHub."""
+    threading.Thread(target=_warm_marketplace, name="marketplace-warmup", daemon=True).start()
 
 
 @app.get("/health", include_in_schema=False)

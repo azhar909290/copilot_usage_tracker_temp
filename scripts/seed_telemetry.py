@@ -13,10 +13,10 @@ import secrets
 from datetime import datetime, timezone
 import urllib.request
 
-from pricing import PriceBook
-from parser import parse_spans
-from store import UsageStore
-from user_mapping import TEAM_GITHUB_USERS
+from tracker.pricing import PriceBook
+from tracker.parser import parse_spans
+from tracker.store import UsageStore
+from tracker.user_mapping import TEAM_GITHUB_USERS
 
 AGENTS = [
     "a1.1-product-discovery",

@@ -57,21 +57,21 @@ Azure Monitor/Application Insights is optionally configured for service telemetr
 
 ### 3.1 Components
 
-#### FastAPI service — `server.py`
+#### FastAPI service — `tracker/server.py`
 
 - Creates the usage store using `DATA_DIR` (default `data`).
 - Receives trace exports at `POST /v1/traces`.
 - Exposes usage, activity, agent-catalogue, GitHub metrics, health, and user-deletion endpoints.
 - Logs HTTP request metadata and can send application telemetry to Azure Monitor.
 
-#### Span parser — `parser.py`
+#### Span parser — `tracker/parser.py`
 
 - Reads token usage, model, timestamps, user, and agent attributes from spans.
 - Skips spans without input or output token usage and configured operations to skip.
 - Resolves identity and agent information from span/resource attributes and related context.
 - Produces an event with a trace/span key, timestamp, user, agent, model, token counts, latency, cost, and priced status.
 
-#### Usage store — `store.py`
+#### Usage store — `tracker/store.py`
 
 - Replays `events.jsonl` during startup to reconstruct its in-memory state.
 - Deduplicates using each event's key.
@@ -89,7 +89,7 @@ Dates in usage rows are derived in the configured `DAILY_TZ` time zone (default 
 - Checks response status, parses JSON, then populates usage rows, events, team data, currency, and catalogue state.
 - Uses frontend utilities in `frontend/src/lib/usage.ts` for filtering and aggregation before rendering.
 
-#### Agent catalogue — `marketplace.py`
+#### Agent catalogue — `tracker/marketplace.py`
 
 - Loads catalogue data from its configured source.
 - Keeps a memory cache and persists a JSON cache at `DATA_DIR/marketplace_cache.json`.
@@ -181,11 +181,11 @@ The aggregate key is `(date, user, agent, model)`. Aggregate values include requ
 
 ## 5. Source files
 
-- Backend API and routes: [`server.py`](./server.py)
-- Span parsing: [`parser.py`](./parser.py)
-- File-backed store: [`store.py`](./store.py)
-- Dashboard data fetching: [`frontend/src/app/dashboard/page.tsx`](./frontend/src/app/dashboard/page.tsx)
-- Dashboard data utilities: [`frontend/src/lib/usage.ts`](./frontend/src/lib/usage.ts)
-- Agent catalogue cache: [`marketplace.py`](./marketplace.py)
-- Backend deployment workflow: [`.github/workflows/main_otel-data.yml`](./.github/workflows/main_otel-data.yml)
-- Frontend deployment workflow: [`.github/workflows/azure-static-web-apps-polite-cliff-03667eb10.yml`](./.github/workflows/azure-static-web-apps-polite-cliff-03667eb10.yml)
+- Backend API and routes: [`tracker/server.py`](../tracker/server.py)
+- Span parsing: [`tracker/parser.py`](../tracker/parser.py)
+- File-backed store: [`tracker/store.py`](../tracker/store.py)
+- Dashboard data fetching: [`frontend/src/app/dashboard/page.tsx`](../frontend/src/app/dashboard/page.tsx)
+- Dashboard data utilities: [`frontend/src/lib/usage.ts`](../frontend/src/lib/usage.ts)
+- Agent catalogue cache: [`tracker/marketplace.py`](../tracker/marketplace.py)
+- Backend deployment workflow: [`.github/workflows/main_otel-data.yml`](../.github/workflows/main_otel-data.yml)
+- Frontend deployment workflow: [`.github/workflows/azure-static-web-apps-polite-cliff-03667eb10.yml`](../.github/workflows/azure-static-web-apps-polite-cliff-03667eb10.yml)

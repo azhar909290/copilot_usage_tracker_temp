@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from store import UsageStore
+from tracker.store import UsageStore
 
 
 def event(key, username, input_tokens):

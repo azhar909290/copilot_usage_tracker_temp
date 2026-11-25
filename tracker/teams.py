@@ -4,8 +4,8 @@ import os
 import threading
 from pathlib import Path
 
-from user_mapping import normalize_user
-from team_assignments import TEAM_NAMES, TEAM_ASSIGNMENTS
+from tracker.user_mapping import normalize_user
+from tracker.team_assignments import TEAM_NAMES, TEAM_ASSIGNMENTS
 
 TEAM_ORGANIZATION = os.getenv("TEAM_ORGANIZATION", "").strip() or "tth-cto-innovation"
 

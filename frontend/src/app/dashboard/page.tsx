@@ -234,6 +234,7 @@ export default function Home() {
   const [booting, setBooting] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const bootPending = useRef(true);
+  const fullEventsLoaded = useRef(false);
   const composeStarted = useRef(0);
   const currency = reportedCurrency || "USD";
 
@@ -298,10 +299,13 @@ export default function Home() {
         const [usagePayload, agentPayload] = await Promise.all([usageResponse.json(), agentResponse.json()]);
         if (!active) return;
         const rows: UsageRow[] = Array.isArray(usagePayload.rows) ? usagePayload.rows : [];
+        // Row-synthesized placeholders let the first paint happen before raw events arrive.
         const events: CallEvent[] =
           Array.isArray(usagePayload.events) && usagePayload.events.length > 0
             ? usagePayload.events
-            : rows.map((row, index) => ({
+            : fullEventsLoaded.current
+              ? []
+              : rows.map((row, index) => ({
                 key: `${row.date}-${row.user}-${row.agent}-${row.model}-${index}`,
                 timestamp: row.last_seen || row.first_seen || `${row.date}T00:00:00Z`,
                 date: row.date,
@@ -318,7 +322,7 @@ export default function Home() {
           updateStage(2, {
             state: "done",
             duration: performance.now() - connected,
-            detail: `${formatCount(events.length)} calls · ${formatCount(agentPayload?.agents?.length ?? 0)} catalog items`,
+            detail: `${formatCount(rows.reduce((sum, row) => sum + (row.requests || 0), 0))} calls · ${formatCount(agentPayload?.agents?.length ?? 0)} catalog items`,
           });
           updateStage(3, { state: "active" });
           composeStarted.current = performance.now();
@@ -327,10 +331,21 @@ export default function Home() {
         setReportedCurrency(typeof usagePayload.currency === "string" && usagePayload.currency ? usagePayload.currency : null);
         setCatalog(agentPayload);
         setTeams(normalizeTeams(usagePayload.teams));
-        setCallEvents(events);
+        if (events.length || !fullEventsLoaded.current) setCallEvents(events);
         setUpdatedAt(new Date());
         setNow(Date.now());
         setError(null);
+
+        // Raw events (ridges, activity, live users) load off the boot critical path, on every refresh.
+        fetch(`${API_BASE}/api/v1/events?limit=10000&days=${PERIODS[PERIODS.length - 1]}`, { cache: "no-store" })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (active && Array.isArray(data?.events)) {
+              fullEventsLoaded.current = true;
+              setCallEvents(data.events);
+            }
+          })
+          .catch(() => {});
       } catch (loadError) {
         if (!active) return;
         setError(loadError instanceof Error ? loadError.message : "Could not connect to the usage API.");

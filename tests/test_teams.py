@@ -2,10 +2,10 @@ import unittest
 from collections import Counter
 import tempfile
 
-from store import UsageStore
-from teams import DemoTeams, TEAM_NAMES
-from team_assignments import TEAM_ASSIGNMENTS
-from test_store import event
+from tracker.store import UsageStore
+from tracker.teams import DemoTeams, TEAM_NAMES
+from tracker.team_assignments import TEAM_ASSIGNMENTS
+from tests.test_store import event
 
 
 class DemoTeamTests(unittest.TestCase):
