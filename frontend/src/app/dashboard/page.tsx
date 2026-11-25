@@ -337,7 +337,7 @@ export default function Home() {
         setError(null);
 
         // Raw events (ridges, activity, live users) load off the boot critical path, on every refresh.
-        fetch(`${API_BASE}/api/v1/events?limit=10000&days=${PERIODS[PERIODS.length - 1]}`, { cache: "no-store" })
+        fetch(`${API_BASE}/api/v1/events?days=${PERIODS[PERIODS.length - 1]}`, { cache: "no-store" })
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (active && Array.isArray(data?.events)) {

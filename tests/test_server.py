@@ -107,6 +107,15 @@ class DeleteUserUsageTests(unittest.TestCase):
 
 
 class TeamUsageApiTests(unittest.TestCase):
+    def test_events_endpoint_returns_all_events_by_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            usage_store = UsageStore(directory)
+            usage_store.add_events([event(f"k{i}", "alice", 1) for i in range(10_001)])
+            with patch.object(server, "store", usage_store):
+                payload = server.activity_events()
+        self.assertEqual(payload["total"], 10_001)
+        self.assertEqual(len(payload["events"]), 10_001)
+
     def test_usage_includes_stable_canonical_demo_memberships(self):
         with tempfile.TemporaryDirectory() as directory:
             usage_store = UsageStore(directory)

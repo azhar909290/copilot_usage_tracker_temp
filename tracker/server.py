@@ -221,7 +221,7 @@ def usage(days: int | None = None):
     operation_id="get_events",
     tags=["Usage"],
 )
-def activity_events(limit: int = 10000, offset: int = 0, days: int | None = None):
+def activity_events(limit: int | None = None, offset: int = 0, days: int | None = None):
     since = None
     if days is not None and days > 0:
         since = (datetime.now(DAILY_TZ).date() - timedelta(days=days - 1)).isoformat()
