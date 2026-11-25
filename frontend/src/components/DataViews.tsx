@@ -3,7 +3,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { displayCallTime, displayDate, formatCompact, formatCount, formatMoney, formatSeconds } from "@/lib/format";
 import type { TeamData } from "@/lib/teams";
-import { isAgentVerseAgent, type CallEvent, type CatalogResponse, type Share, type Totals } from "@/lib/usage";
+import { groupCallRuns, isAgentVerseAgent, type CallEvent, type CatalogResponse, type Share, type Totals } from "@/lib/usage";
 import { Donut } from "./charts";
 import { ModelPodium } from "./ModelPodium";
 import { NeuralFlow } from "./NeuralFlow";
@@ -13,6 +13,21 @@ import { Empty, ShareBar, SortHeader, sortBy, useSort } from "./table";
 
 export const SERIES_TOKENS = ["--c-calls", "--c-tokens", "--c-cost", "--c-rose", "--c-sun", "--c-lime", "--c-sky"];
 export const seriesColor = (index: number) => (index < SERIES_TOKENS.length ? `var(${SERIES_TOKENS[index]})` : "var(--faint)");
+
+const IST = "Asia/Kolkata";
+
+/** "Nov 25, 15:17" for one call, "Nov 25, 15:17–15:21" for a same-day run. */
+function formatRunTime(start: string, end: string, seconds = false) {
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  if (Number.isNaN(from) || Number.isNaN(to)) return "Time unavailable";
+  const clock: Intl.DateTimeFormatOptions = { timeZone: IST, hour: "2-digit", minute: "2-digit", second: seconds ? "2-digit" : undefined, hour12: false };
+  const day = (time: number) => new Date(time).toLocaleDateString("en-US", { timeZone: IST, month: "short", day: "numeric" });
+  const at = (time: number) => new Date(time).toLocaleTimeString("en-US", clock);
+  const first = `${day(from)}, ${at(from)}`;
+  if (at(from) === at(to) && day(from) === day(to)) return first;
+  return day(from) === day(to) ? `${first}–${at(to)}` : `${first} – ${day(to)}, ${at(to)}`;
+}
 
 export function ModelsView({
   shares,
@@ -293,14 +308,23 @@ export function ActivityView({
   catalog?: CatalogResponse | null;
   onPickDay: (date: string) => void;
 }) {
-  type Key = "timestamp" | "user" | "agent" | "model" | "input_tokens" | "output_tokens" | "total_tokens" | "latency_ms" | "cost";
+  type Key = "timestamp" | "user" | "agent" | "model" | "calls" | "input_tokens" | "output_tokens" | "total_tokens" | "latency_ms" | "cost";
   const [sort, onSort] = useSort<Key>({ key: "timestamp", direction: "desc" }, ["user", "agent", "model"]);
   const [limit, setLimit] = useState(60);
-  const sorted = sortBy(events, sort, (event, key) => {
-    if (key === "total_tokens") return (event.input_tokens || 0) + (event.output_tokens || 0);
-    if (key === "timestamp") return Date.parse(event.timestamp || event.date || "1970-01-01");
-    return event[key] ?? (typeof event.input_tokens === "number" ? -1 : "");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const runs = useMemo(() => groupCallRuns(events), [events]);
+  const sorted = sortBy(runs, sort, (run, key) => {
+    if (key === "timestamp") return Date.parse(run.end || "1970-01-01");
+    if (key === "calls") return run.calls.length;
+    return run[key] ?? -1;
   });
+  const toggleRun = (key: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const catalogNames = useMemo(() => {
     if (!catalog?.agents?.length) return undefined;
@@ -384,10 +408,10 @@ export function ActivityView({
         <header className="block-head">
           <div className="block-title">
             <h2>Recorded calls</h2>
-            <p>Every model call in range, in IST</p>
+            <p>Back-to-back calls by the same person, agent and model are combined. Select a row to see each call.</p>
           </div>
           <span className="muted">
-            <span className="num">{formatCount(events.length)}</span> calls
+            <span className="num">{formatCount(events.length)}</span> calls · <span className="num">{formatCount(runs.length)}</span> rows
           </span>
         </header>
         <div className="table-frame">
@@ -398,6 +422,7 @@ export function ActivityView({
                 <SortHeader sortKey="user" label="User" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="agent" label="Agent" sort={sort} onSort={onSort} />
                 <SortHeader sortKey="model" label="Model" sort={sort} onSort={onSort} />
+                <SortHeader sortKey="calls" label="Calls" sort={sort} onSort={onSort} numeric />
                 <SortHeader sortKey="input_tokens" label="Input" sort={sort} onSort={onSort} numeric />
                 <SortHeader sortKey="output_tokens" label="Output" sort={sort} onSort={onSort} numeric />
                 <SortHeader sortKey="total_tokens" label="Total" sort={sort} onSort={onSort} numeric />
@@ -406,31 +431,62 @@ export function ActivityView({
               </tr>
             </thead>
             <tbody>
-              {sorted.slice(0, limit).map((event, index) => (
-                <tr key={`${event.key}-${index}`} className="is-entering" style={{ "--i": index } as CSSProperties}>
-                  <td className="num muted nowrap">
-                    <time dateTime={event.timestamp} title={displayCallTime(event.timestamp)}>
-                      {Number.isNaN(Date.parse(event.timestamp))
-                        ? "Time unavailable"
-                        : new Date(event.timestamp).toLocaleString("en-US", { timeZone: "Asia/Kolkata", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
-                    </time>
-                  </td>
-                  <td>
-                    <Person name={event.user} hue={hues.get(event.user)} />
-                  </td>
-                  <td className="ellipsis" title={event.agent}>
-                    {event.agent}
-                  </td>
-                  <td className="ellipsis muted" title={event.model}>
-                    {event.model}
-                  </td>
-                  <td className="num muted">{formatCount(event.input_tokens)}</td>
-                  <td className="num muted">{formatCount(event.output_tokens)}</td>
-                  <td className="num">{formatCount((event.input_tokens || 0) + (event.output_tokens || 0))}</td>
-                  <td className="num muted">{formatSeconds(event.latency_ms)}</td>
-                  <td className="num">{formatMoney(event.cost, currency, 4)}</td>
-                </tr>
-              ))}
+              {sorted.slice(0, limit).flatMap((run, index) => {
+                const grouped = run.calls.length > 1;
+                const open = grouped && expanded.has(run.key);
+                const rows = [
+                  <tr
+                    key={`${run.key}-${index}`}
+                    className="is-entering"
+                    style={{ "--i": index, cursor: grouped ? "pointer" : undefined } as CSSProperties}
+                    onClick={grouped ? () => toggleRun(run.key) : undefined}
+                    aria-expanded={grouped ? open : undefined}
+                  >
+                    <td className="num muted nowrap">
+                      <time dateTime={run.end} title={displayCallTime(run.end)}>
+                        {formatRunTime(run.start, run.end)}
+                      </time>
+                    </td>
+                    <td>
+                      <Person name={run.user} hue={hues.get(run.user)} />
+                    </td>
+                    <td className="ellipsis" title={run.agent}>
+                      {run.agent}
+                    </td>
+                    <td className="ellipsis muted" title={run.model}>
+                      {run.model}
+                    </td>
+                    <td className="num">
+                      {grouped ? `${open ? "▾" : "▸"} ${formatCount(run.calls.length)}` : "1"}
+                    </td>
+                    <td className="num muted">{formatCount(run.input_tokens)}</td>
+                    <td className="num muted">{formatCount(run.output_tokens)}</td>
+                    <td className="num">{formatCount(run.total_tokens)}</td>
+                    <td className="num muted" title={grouped ? "Total model time across these calls" : undefined}>
+                      {formatSeconds(run.latency_ms)}
+                    </td>
+                    <td className="num">{formatMoney(run.cost, currency, 4)}</td>
+                  </tr>,
+                ];
+                if (open) {
+                  for (const call of [...run.calls].reverse()) {
+                    rows.push(
+                      <tr key={`${run.key}-${call.key}`} className="muted" style={{ fontSize: "0.92em" }}>
+                        <td className="num nowrap" style={{ paddingLeft: 24 }}>
+                          <time dateTime={call.timestamp}>{formatRunTime(call.timestamp, call.timestamp, true)}</time>
+                        </td>
+                        <td colSpan={4} />
+                        <td className="num">{formatCount(call.input_tokens)}</td>
+                        <td className="num">{formatCount(call.output_tokens)}</td>
+                        <td className="num">{formatCount((call.input_tokens || 0) + (call.output_tokens || 0))}</td>
+                        <td className="num">{formatSeconds(call.latency_ms)}</td>
+                        <td className="num">{formatMoney(call.cost, currency, 4)}</td>
+                      </tr>,
+                    );
+                  }
+                }
+                return rows;
+              })}
             </tbody>
           </table>
           {!events.length && <Empty>{loading ? "Loading calls…" : "No calls match these filters."}</Empty>}

@@ -97,6 +97,7 @@ DEFAULT_USER_MAPPINGS = {
     "318823":"ESavitha",
     "2733712":"rishi-tcs",
     "375758": "shanmugajaganathan",
+    "JeevanKumarAnanthula": "   jeevankumar-a"
 
     # "rachel.adams": "RamyaMurugan-tcs",
     # "samuel.green": "Ganeshkumar-Balu",

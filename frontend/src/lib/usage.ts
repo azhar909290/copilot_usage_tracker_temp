@@ -229,6 +229,66 @@ export function ridgeData(events: CallEvent[], days: string[], metric: Metric): 
 
 export type LiveUser = { user: string; lastSeen: number };
 
+export const CALL_RUN_GAP_MS = 30 * 60_000;
+
+export type CallRun = {
+  key: string;
+  user: string;
+  agent: string;
+  model: string;
+  start: string;
+  end: string;
+  calls: CallEvent[];
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  latency_ms: number | null;
+  cost: number;
+};
+
+/**
+ * Collapses each user's back-to-back calls to the same agent and model into one run.
+ * A different agent or model in between, or an idle gap longer than `gapMs`, starts a new run.
+ */
+export function groupCallRuns(events: CallEvent[], gapMs = CALL_RUN_GAP_MS): CallRun[] {
+  const time = (event: CallEvent) => {
+    const parsed = Date.parse(event.timestamp);
+    return Number.isNaN(parsed) ? Date.parse(event.date || "1970-01-01") : parsed;
+  };
+  const ordered = [...events].sort((a, b) => time(a) - time(b));
+  const open = new Map<string, CallRun>();
+  const runs: CallRun[] = [];
+  for (const event of ordered) {
+    let run = open.get(event.user);
+    if (!run || run.agent !== event.agent || run.model !== event.model || time(event) - Date.parse(run.end) > gapMs) {
+      run = {
+        key: event.key,
+        user: event.user,
+        agent: event.agent,
+        model: event.model,
+        start: event.timestamp,
+        end: event.timestamp,
+        calls: [],
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        latency_ms: null,
+        cost: 0,
+      };
+      open.set(event.user, run);
+      runs.push(run);
+    }
+    run.calls.push(event);
+    run.end = event.timestamp;
+    run.input_tokens += event.input_tokens || 0;
+    run.output_tokens += event.output_tokens || 0;
+    run.total_tokens += (event.input_tokens || 0) + (event.output_tokens || 0);
+    if (typeof event.latency_ms === "number") run.latency_ms = (run.latency_ms ?? 0) + event.latency_ms;
+    run.cost += event.cost || 0;
+  }
+  return runs;
+}
+
 export function getLiveUsers(events: CallEvent[], now: number): LiveUser[] {
   const latest = new Map<string, number>();
   for (const event of events) {

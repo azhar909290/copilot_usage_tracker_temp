@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { estimateImpact } from "../src/lib/impact";
+import { groupCallRuns } from "../src/lib/usage";
 
 test("estimates hours, value and net ROI from recorded calls", () => {
   assert.deepEqual(estimateImpact({ requests: 7590, cost: 32.93, unpriced: 0 }, "USD"), {
@@ -85,4 +86,41 @@ test("does not calculate ROI from invalid spend or pricing counts", () => {
       assert.deepEqual(estimate.roi, { kind: "unavailable", reason: "invalid-spend" });
     }
   }
+});
+
+test("groups each user's back-to-back calls to the same agent and model", () => {
+  const call = (key: string, user: string, agent: string, minute: number, input = 10) => ({
+    key,
+    timestamp: new Date(Date.UTC(2026, 10, 25, 9, minute)).toISOString(),
+    date: "2026-11-25",
+    user,
+    agent,
+    model: "m",
+    input_tokens: input,
+    output_tokens: 1,
+    latency_ms: 100,
+    cost: 0.5,
+  });
+  const runs = groupCallRuns([
+    call("a1", "azhar", "x", 0),
+    call("j1", "jeevan", "xtab", 1),
+    call("a2", "azhar", "x", 2, 20),
+    call("a3", "azhar", "y", 3),
+    call("a4", "azhar", "x", 4),
+    call("a5", "azhar", "x", 40),
+  ]);
+  assert.deepEqual(
+    runs.map((run) => [run.user, run.agent, run.calls.map((c) => c.key)]),
+    [
+      ["azhar", "x", ["a1", "a2"]],
+      ["jeevan", "xtab", ["j1"]],
+      ["azhar", "y", ["a3"]],
+      ["azhar", "x", ["a4"]],
+      ["azhar", "x", ["a5"]],
+    ],
+  );
+  assert.equal(runs[0].input_tokens, 30);
+  assert.equal(runs[0].total_tokens, 32);
+  assert.equal(runs[0].latency_ms, 200);
+  assert.equal(runs[0].cost, 1);
 });

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:impact": "tsc --target ES2020 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --outDir .next/impact-tests tests/impact.test.ts && node --test .next/impact-tests/tests/impact.test.js"
+    "test:impact": "tsc --target ES2021 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --outDir .next/impact-tests tests/impact.test.ts && node --test .next/impact-tests/tests/impact.test.js"
   },
   "dependencies": {
     "@number-flow/react": "^0.6.2",
